@@ -19,12 +19,23 @@ Everything runs in your browser: your images never leave your computer and no ne
 - An FDM printer, 0.4 mm nozzle, PLA. No supports needed.
 - For the multicolor decor: one filament per distinct color (AMS, AMS lite or manual swaps).
 
+## What it does
+
+- **Image to clicker**: the image outline becomes the shell shape, its colors become the cap's decor.
+- **Frames**: circle, rounded square, hexagon, octagon, shield, pill… The image (a photo, a complicated logo) becomes the decor of a clean shape, fitted so nothing overflows.
+- **Text and emojis**: type a name (up to three lines, six fonts), pick a frame and colors.
+- **Key ring**: a flat drilled lug at the position you want on the outline.
+- **Test coupon**: a small plate printed in 25 minutes (4 pockets, 4 crosses) to dial in the fit *before* a big clicker.
+- **Live preview**: press the cap (click, Space or button) with the sound of a clicky, tactile or linear switch; exploded view, cutaway, visible switch, dimensions, top view, **plate view** (the flipped cap as it prints, no supports).
+- **Projects**: save and reopen a project (`.clickgen.json`) with the image, colors and all settings.
+- **Export**: multicolor `.3mf` (Bambu Studio / OrcaSlicer, selectable layer height) or a zip of STL files.
+
 ## How it works
 
-1. **Cut-out**: image transparency, or background color (sampled on the borders, adjustable tolerance). The outline is traced at sub-pixel precision, smoothed, then cleaned in millimeters (narrow gaps closed, details thinner than the nozzle removed).
-2. **Two parts**: the **shell** follows the silhouette; the **cap** is the silhouette shrunk by the wall (2 mm) and the clearance (0.6 mm). It slides inside the shell.
-3. **Switch placement**: ClickGen searches the cap for the position and angle where the switch square (14.8 mm relief + walls) fits entirely, as close as possible to the center of mass. Shapes that are too small are enlarged automatically (can be disabled).
-4. **Colors**: the image is reduced to 1–5 colors (k-means in Lab). The largest area colors the cap; the others become thin decor layers printed against the bed.
+1. **Cut-out**: image transparency, or background color (sampled on the borders, or picked with the eyedropper; adjustable tolerance). The outline is traced at sub-pixel precision, smoothed, then cleaned in millimeters (narrow gaps closed, details thinner than the nozzle removed).
+2. **Two parts**: the **shell** follows the silhouette (or the frame); the **cap** is that shape shrunk by the wall (2 mm) and the clearance (0.6 mm). It slides inside the shell.
+3. **Switch placement**: ClickGen searches the cap for the position and angle where the switch square (14.8 mm relief + walls) fits entirely, as close as possible to the center of mass. Shapes that are too small are enlarged to the minimum needed (can be disabled).
+4. **Colors**: the image is reduced to 1–5 colors (k-means in Lab, final color = median of the pixels). With a cut-out subject, the background is the cap color and each subject color becomes a decor layer, printed against the bed.
 5. **Export**: a `.3mf` with two objects (shell upright, **cap flipped** decor-side down), one filament per distinct color, the purge tower placed inside the plate; or a zip of STL files.
 
 ## Print and assemble
@@ -49,7 +60,7 @@ Adjust in steps of 0.05 to 0.1 mm after a first test print.
 ## Development
 
 ```bash
-npm test          # 23 tests: image, placement, mechanical dimensions, 3MF, STL
+npm test          # 32 tests: image, placement, mechanical dimensions, interference, frames, 3MF, STL
 npm run serve     # dev server on port 5173
 ```
 
@@ -59,7 +70,8 @@ npm run serve     # dev server on port 5173
 
 ## Known limits
 
-- Very detailed images and photos give complicated silhouettes: prefer a logo, a mascot or flat art on a transparent or plain background.
+- The outline of a very detailed image or photo is complicated: pick a **frame** instead (the image stays as the decor), or use a logo, a mascot or flat art on a transparent or plain background.
+- Beyond 4 distinct colors (shell included) an AMS lite is not enough: give two parts the same color or reduce the color count.
 - Only one piece is kept (the largest); detached islands are ignored.
 - Only the A1 mini profile is embedded in the 3MF.
 

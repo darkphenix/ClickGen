@@ -47,6 +47,29 @@ Capuchon (repère local, bord = 0) : hauteur 6,2 mm ; relief sous le capuchon de
 6. `src/geometry/clicker.js` : coque, capuchon, couches de décor (découpées dans la face, pas superposées).
 7. `src/pipeline.js` : orchestre, agrandit la forme jusqu'à ce que le switch rentre (pas de 6 %).
 
+## Cadres, texte, anneau, banc d'essai
+
+- **Cadres** (`src/geometry/frames.js`) : polygones analytiques convexes (cercle, carré lisse, carré arrondi, hexagone, octogone, écusson, pilule), plus grande dimension = 1, mis à l'échelle de la taille demandée. La silhouette de la coque est le cadre ; l'image n'est plus que le décor. Un sujet détouré (fond transparent) est ajusté par son **enveloppe convexe** (`fitInside`) pour qu'aucune extrémité ne soit rognée ; une image entière (photo) recouvre tout le cadre.
+- **Fond réservé** : avec un sujet détouré, l'indice de couleur 0 (couleur du capuchon) est le fond du cadre, les couleurs du sujet prennent les indices 1..k, y compris le blanc (sinon un sujet blanc se confondrait avec le fond).
+- **Texte** (`src/image/textimage.js`) : le texte est rendu sur un canvas transparent puis suit le même chemin qu'une image importée. Les emojis passent par la police du système.
+- **Anneau** : disque de rayon 4,4 mm, épaisseur 3,6 mm, trou de 3,6 mm, centré à 3,2 mm au-delà du contour dans la direction choisie ; fixé au pied de la coque (z de 0 à 3,6), donc sans supports.
+- **Banc d'essai** (`src/geometry/coupon.js`) : plaque de 4 mm avec 4 logements (réglage courant + −0,10 / 0 / +0,10 / +0,20 mm) et platine avec 4 fourreaux à croix (mêmes écarts). Les écarts sont relatifs aux curseurs : après avoir choisi, réglez les curseurs sur la valeur retenue.
+
+## Performances
+
+Mesures sur un ours de 800 px (mono-fil, machine de développement) : détourage + couleurs ~0,2 s, recalcul complet de la 3D ~0,45 s, recalcul avec un seul élément à refaire ~0,2 s.
+- Placement du switch : passe grossière (0,6 mm, 12 angles) puis affinage local fin autour du meilleur résultat (rastérisation d'une boîte seulement) : ~50 ms au lieu de ~400 ms.
+- Agrandissement automatique : progression géométrique (× 1,25) puis dichotomie (≤ 5 essais) au lieu de pas de 6 %.
+- Cache par pièce (`makeClicker(..., {cache})`) : la coque et le capuchon sont conservés tant que leurs entrées (contours, position, réglages utiles) ne changent pas.
+- Chanfreins : décalages à jointure « Miter » sur 2 marches ; les décalages arrondis dominaient le coût.
+- Quantification des couleurs sur les couleurs **distinctes** (clés RGB 5 bits) et non sur chaque pixel.
+
+## Pièges rencontrés
+
+- `CrossSection.extrude(h, n, twist, scaleTop)` : un `scaleTop` numérique ne réduit que l'axe X dans manifold 3.5 ; il faut un couple `[x, y]`. Le test d'interférences (`test/mechanics.test.mjs`) l'a révélé.
+- Les maillages de manifold peuvent contenir des sommets de même position mais d'indices différents (pincement quand deux régions de décor se touchent en un point) : ils sont fermés **en indices** ; on vérifie donc l'étanchéité sans souder par position.
+- Un contour de décor exactement confondu avec celui du capuchon crée des faces coïncidentes : le décor déborde de 0,5 mm et la découpe 3D l'ajuste.
+
 ## Export 3MF (Bambu Studio / OrcaSlicer)
 
 - `3D/3dmodel.model` : un `<object>` par volume (coque, corps du capuchon, une couche par couleur) et un objet « assemblage » par pièce imprimée ; transformation de 180° du capuchon appliquée aux sommets.

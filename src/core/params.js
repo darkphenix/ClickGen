@@ -53,6 +53,8 @@ export const DEFAULTS = Object.freeze({
   keyringAngle: 90, // position de l'anneau sur le contour (degrés)
 
   placementAngle: null, // angle imposé du switch (degrés) ; null = automatique
+  placementX: null, // position imposée du switch (mm, repère de la coque) ; null = automatique
+  placementY: null,
 
   // --- Impression --------------------------------------------------------
   bed: 180, // plateau carré (mm) : A1 mini = 180, A1/P1/X1 = 256

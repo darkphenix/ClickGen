@@ -150,8 +150,18 @@ export async function makeClicker(a, p, opts = {}) {
       const so = outlineAt(sc, k);
       const capAll = capOutline(wasm, sc, so.cs, d);
       const polys = capAll.toPolygons();
-      const placement = polys.length ? findPlacement(polys, d.capKeepOut, { angles }) : null;
-      return { sc, S: so.cs, dropped: so.dropped, capAll, placement, k };
+      // position choisie à la main : acceptée seulement si tout le carré de sécurité tient dans le capuchon
+      let placement = null, manual = false;
+      if (p.placementX != null && p.placementY != null) {
+        const side = d.capKeepOut;
+        const sq = sc.add(sc.add(sc.add(CrossSection.square([side, side], true)).rotate(p.placementAngle ?? 0)).translate(p.placementX, p.placementY));
+        if (sc.add(sq.subtract(capAll)).area() < 0.02) {
+          placement = { x: p.placementX, y: p.placementY, angle: p.placementAngle ?? 0, clearance: 0 };
+          manual = true;
+        }
+      }
+      if (!placement) placement = polys.length ? findPlacement(polys, d.capKeepOut, { angles }) : null;
+      return { sc, S: so.cs, dropped: so.dropped, capAll, placement, manual, k };
     } catch (e) {
       sc.dispose();
       throw e;
@@ -201,6 +211,7 @@ export async function makeClicker(a, p, opts = {}) {
     scope = best.sc;
     const { S, dropped, placement } = best;
     const k = best.k;
+    const manualWanted = p.placementX != null && p.placementY != null;
     const cap = componentAt(wasm, scope, best.capAll, placement.x, placement.y);
     const finalSize = sizeOf(k);
     const grown = k / k0 > 1.001;
@@ -208,6 +219,7 @@ export async function makeClicker(a, p, opts = {}) {
     if (grown) warnings.push({ code: 'grown', size: finalSize });
     if (finalSize > maxSize) warnings.push({ code: 'toobig', size: finalSize, bed: p.bed });
     if (dropped) warnings.push({ code: 'dropped', count: dropped });
+    if (manualWanted && !best.manual) warnings.push({ code: 'manualReset' }); // la position choisie ne tenait plus
 
     // --- décor : une région par couleur (hors couleur de base), disjointes ----------------------
     await step('art');
@@ -293,6 +305,7 @@ export async function makeClicker(a, p, opts = {}) {
       size: finalSize,
       grown,
       framed,
+      manual: !!best.manual,
       keyring: meshes.keyring ?? null,
       outline: { w: b.max[0] - b.min[0], h: b.max[1] - b.min[1] },
       warnings,

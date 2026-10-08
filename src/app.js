@@ -2,7 +2,7 @@
 
 import { DEFAULTS } from './core/params.js';
 import { detectLang, fmt, getLang, setLang, t } from './ui/i18n.js';
-import { playKey, setSoundEnabled } from './ui/sound.js';
+import { playKey, setSoundKind } from './ui/sound.js';
 import { loadImage } from './imageio.js';
 import { renderText } from './image/textimage.js';
 import { Runner } from './runner.js';
@@ -21,11 +21,14 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const LS_PARAMS = 'clickgen.params.v1';
 const LS_SHELL = 'clickgen.shellColor';
 const LS_TEXT = 'clickgen.text.v1';
+const LS_SOUND = 'clickgen.sound';
 const FIT_KEYS = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle'];
 const SHELL_DARK = '#2b2f36';
 const SHELL_LIGHT = '#e4e7ee';
 const TEXT_BG = '#2a5de8'; // fond par défaut d'un clicker « texte » : le bleu des switches clicky
-const NOT_PERSISTED = ['placementAngle', 'bgColor'];
+const NOT_PERSISTED = ['placementAngle', 'placementX', 'placementY', 'bgColor'];
+// réglages qui changent la forme : la position du switch choisie à la main n'a plus de sens après eux
+const SHAPE_KEYS = ['size', 'frame', 'frameZoom', 'frameContent', 'smooth', 'minDetail', 'closeGap', 'keepMain', 'wall', 'clearance', 'autoGrow', 'maskMode', 'tolerance', 'invert', 'fillHoles'];
 // Seuls les réglages « machine » survivent d'une visite à l'autre : ajustements, imprimante, tailles.
 // La forme, le cadre, l'anneau… dépendent de l'image et repartent des valeurs par défaut.
 const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'artDepth', 'relief', 'size', 'autoGrow'];
@@ -83,7 +86,7 @@ function sanitizeParams(src) {
   const out = {};
   if (!src || typeof src !== 'object') return out;
   for (const [k, def] of Object.entries(DEFAULTS)) {
-    if (!(k in src) || k === 'placementAngle') continue;
+    if (!(k in src) || k === 'placementAngle' || k === 'placementX' || k === 'placementY') continue;
     let v = src[k];
     if (k === 'bgColor') { if (v === null || (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v))) out[k] = v === null ? null : v.toLowerCase(); continue; }
     if (typeof v !== typeof def) continue;
@@ -102,7 +105,7 @@ function loadParams() {
   let saved = {};
   try { saved = JSON.parse(safeGet(LS_PARAMS) || '{}'); } catch { /* réglages illisibles */ }
   const keep = Object.fromEntries(Object.entries(sanitizeParams(saved)).filter(([k]) => PERSISTED.includes(k)));
-  return { ...DEFAULTS, ...keep, placementAngle: null, bgColor: null };
+  return { ...DEFAULTS, ...keep, placementAngle: null, placementX: null, placementY: null, bgColor: null };
 }
 function saveParams() {
   safeSet(LS_PARAMS, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, params[k]]))));
@@ -120,7 +123,7 @@ const params = loadParams();
 // ------------------------------------------------------- moteurs (worker, 3D) --
 let runner = null, viewer = null;
 try { runner = new Runner(); } catch { store.msgs.push({ kind: 'error', key: 'msg.workerFail' }); }
-try { viewer = new Viewer($('#gl'), $('#dims')); } catch (e) { console.error(e); }
+try { viewer = new Viewer($('#gl'), $('#dims')); } catch (e) { console.error(e); store.msgs.push({ kind: 'warn', key: 'msg.noWebgl' }); }
 const topview = new TopView($('#top2d'));
 
 // ------------------------------------------------------------ réglages ↔ DOM --
@@ -166,8 +169,9 @@ function syncVisibility() {
   $('#frameOpts').hidden = !framed;
   $('#outlineOpts').hidden = framed;
   $('#ringAngleField').hidden = !params.keyring;
+  // la tolérance du fond ne sert que si l'on détoure par couleur (et, dans un cadre, seulement pour « sujet détouré »)
   const asColor = store.analysis?.mode === 'color' || params.maskMode === 'color' || !!params.bgColor;
-  $('#toleranceField').hidden = !asColor;
+  $('#toleranceField').hidden = !asColor || (framed && params.frameContent !== 'subject');
   $('#clearBg').hidden = !params.bgColor;
   $('#pickBg').setAttribute('aria-pressed', String(store.picking));
   $('#drop').classList.toggle('picking', store.picking);
@@ -177,6 +181,7 @@ function bindParams() {
   for (const el of $$('[data-param]')) {
     el.addEventListener('input', () => {
       params[el.dataset.param] = readEl(el);
+      if (SHAPE_KEYS.includes(el.dataset.param)) { params.placementX = params.placementY = null; params.placementAngle = null; }
       if (el.type === 'range') setPct(el);
       updateOutputs();
       syncVisibility();
@@ -211,6 +216,7 @@ async function useImage(img, o = {}) {
   if (resetColors) store.overrides = { ...colors };
   store.analysis = null;
   params.placementAngle = null;
+  params.placementX = params.placementY = null;
   params.bgColor = null;
   store.picking = false;
   store.thumbEl = new Image();
@@ -294,7 +300,10 @@ function bindImageInput() {
     document.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'drop' || e.target === document.documentElement || !e.relatedTarget) drop.classList.remove('over'); });
   }
   document.addEventListener('drop', (e) => {
-    const f = [...(e.dataTransfer?.files ?? [])].find((x) => x.type.startsWith('image/') || /\.svg$/i.test(x.name));
+    const files = [...(e.dataTransfer?.files ?? [])];
+    const project = files.find((x) => /\.json$/i.test(x.name));
+    if (project) { openProject(project); return; }
+    const f = files.find((x) => x.type.startsWith('image/') || /\.svg$/i.test(x.name));
     if (f) loadFrom(f);
   });
   document.addEventListener('paste', (e) => {
@@ -337,7 +346,7 @@ function scheduleText(delay = 320) {
 async function applyText(first = false) {
   try {
     const img = await renderText({ text: store.text.value, font: store.text.font, color: '#ffffff' });
-    if (!img) { setBusy(false); return; }
+    if (!img || store.src !== 'text') { setBusy(false); return; } // texte vide, ou l'utilisateur a changé d'onglet entre-temps
     if (params.frame === 'image') { params.frame = 'pill'; syncAll(); saveParams(); } // un texte seul n'a pas de contour utile
     await useImage(img, first ? { colors: { 0: TEXT_BG, 1: '#ffffff' } } : { resetColors: false });
   } catch (e) {
@@ -399,12 +408,18 @@ function onResult(msg) {
   const colors = currentColors();
   viewer?.setModel(r);
   viewer?.setColors(colors);
-  topview.setData({ preview: r.preview, placement: r.placement, outline: r.outline, colors, keyring: r.keyring });
-  store.msgs = r.warnings.map((w) => {
-    if (w.code === 'grown') return { kind: 'info', key: 'msg.grown', vars: { size: fmt(w.size) } };
-    if (w.code === 'toobig') return { kind: 'warn', key: 'msg.toobig', vars: { size: fmt(w.size), bed: params.bed } };
-    if (w.code === 'dropped') return { kind: 'info', key: 'msg.dropped', vars: { count: w.count } };
-    return { kind: 'info', raw: w.text };
+  topview.setData({ preview: r.preview, placement: r.placement, outline: r.outline, colors, keyring: r.keyring, keepOut: r.dims.capKeepOut });
+  store.msgs = r.warnings.flatMap((w) => {
+    if (w.code === 'grown') {
+      const out = [{ kind: 'info', key: 'msg.grown', vars: { size: fmt(w.size) } }];
+      // forme très fine : le switch n'entre qu'à une taille démesurée, un cadre est la bonne réponse
+      if (w.size > params.size * 1.3 && params.frame === 'image') out.push({ kind: 'info', key: 'msg.growTip' });
+      return out;
+    }
+    if (w.code === 'toobig') return [{ kind: 'warn', key: 'msg.toobig', vars: { size: fmt(w.size), bed: params.bed } }];
+    if (w.code === 'dropped') return [{ kind: 'info', key: 'msg.dropped', vars: { count: w.count } }];
+    if (w.code === 'manualReset') { params.placementX = params.placementY = null; return [{ kind: 'info', key: 'msg.manualReset' }]; }
+    return [{ kind: 'info', raw: w.text }];
   });
   renderMessages();
   renderSwatches();
@@ -719,7 +734,10 @@ function bindStage() {
   $('#tCut').addEventListener('change', (e) => viewer?.setCut(e.target.checked));
   $('#tDims').addEventListener('change', (e) => viewer?.setDims(e.target.checked));
   $('#tPrint').addEventListener('change', (e) => viewer?.setPrintLayout(e.target.checked));
-  $('#tSound').addEventListener('change', (e) => setSoundEnabled(e.target.checked));
+  const soundSel = $('#soundKind');
+  soundSel.value = safeGet(LS_SOUND) || 'blue';
+  setSoundKind(soundSel.value);
+  soundSel.addEventListener('change', () => { setSoundKind(soundSel.value); safeSet(LS_SOUND, soundSel.value); });
   setPct(explode);
 
   const angle = $('#angle');
@@ -729,7 +747,13 @@ function bindStage() {
     $('#angleOut').textContent = `${angle.value}°`;
     requestRun();
   });
-  $('#angleAuto').addEventListener('click', () => { params.placementAngle = null; requestRun(0); });
+  $('#angleAuto').addEventListener('click', () => { params.placementAngle = null; params.placementX = params.placementY = null; requestRun(0); });
+  // glisser le switch dans la vue de dessus : position et angle sont alors imposés
+  topview.onPlace = (x, y) => {
+    params.placementX = x; params.placementY = y;
+    params.placementAngle = store.result ? store.result.placement.angle : (params.placementAngle ?? 0);
+    requestRun(0);
+  };
   $('#dl3mf').addEventListener('click', export3mf);
   $('#dlstl').addEventListener('click', exportStl);
   $('#coupon').addEventListener('click', exportCoupon);
@@ -772,6 +796,7 @@ function init() {
   renderMessages();
   setExportEnabled(false);
   setBusy(true);
+  if (!viewer) $('#viewTabs button[data-view="top"]').click(); // sans WebGL : vue de dessus + exports
   loadFrom('samples/cat.svg');
 }
 

@@ -51,6 +51,9 @@
               <button type="button" class="chip" data-sample="star" data-i18n="img.sample.star">Étoile</button>
               <button type="button" class="chip" data-sample="ghost" data-i18n="img.sample.ghost">Fantôme</button>
               <button type="button" class="chip" data-sample="heart" data-i18n="img.sample.heart">Cœur</button>
+              <button type="button" class="chip" data-sample="rocket" data-i18n="img.sample.rocket">Fusée</button>
+              <button type="button" class="chip" data-sample="dino" data-i18n="img.sample.dino">Dino</button>
+              <button type="button" class="chip" data-sample="bolt" data-i18n="img.sample.bolt">Éclair</button>
             </div>
             <div class="field">
               <label for="maskMode"><span data-i18n="img.mode">Détourage</span></label>
@@ -256,7 +259,20 @@
           </div>
         </details>
 
-        <p class="foot" data-i18n="foot.license"></p>
+        <details class="sec">
+          <summary data-i18n="help.title">Imprimer et assembler</summary>
+          <div class="sec-body">
+            <ol class="steps">
+              <li data-i18n="help.1">Téléchargez le .3mf et ouvrez-le dans Bambu Studio : deux objets (la coque et le capuchon retourné), un filament par couleur.</li>
+              <li data-i18n="help.2">Imprimez sans supports, en PLA, buse 0,4 mm, couches de 0,16 à 0,20 mm.</li>
+              <li data-i18n="help.3">Enfoncez le switch par le haut dans le logement (broches vers le bas), puis poussez le capuchon sur la tige jusqu'à ce qu'il soit bien assis.</li>
+              <li data-i18n="help.4">Trop serré ou trop lâche ? Imprimez le banc d'essai (section Ajustements) et reportez le meilleur réglage.</li>
+              <li data-i18n="help.5">Il vous faut un switch mécanique compatible MX (Cherry, Gateron, Kailh…). Un modèle « clicky » (bleu) donne le vrai clic.</li>
+            </ol>
+          </div>
+        </details>
+
+        <p class="foot"><span data-i18n="foot.license"></span> <a href="https://github.com/darkphenix/ClickGen/issues" target="_blank" rel="noopener" data-i18n="foot.issue">Signaler un problème</a></p>
       </div>
 
       <div class="exportbar" id="exportbar">
@@ -292,10 +308,17 @@
           <label class="toggle sm"><input type="checkbox" id="tCut"><i></i><span data-i18n="view.cut">Coupe</span></label>
           <label class="toggle sm"><input type="checkbox" id="tDims" checked><i></i><span data-i18n="view.dims">Cotes</span></label>
           <label class="toggle sm"><input type="checkbox" id="tPrint"><i></i><span data-i18n="view.print">Plateau</span></label>
-          <label class="toggle sm"><input type="checkbox" id="tSound" checked><i></i><span data-i18n="view.sound">Son</span></label>
+          <label class="mini sound-pick"><span data-i18n="view.sound">Son</span>
+            <select id="soundKind">
+              <option value="blue" data-i18n="sound.blue">Clicky</option>
+              <option value="brown" data-i18n="sound.brown">Tactile</option>
+              <option value="red" data-i18n="sound.red">Linéaire</option>
+              <option value="off" data-i18n="sound.off">Coupé</option>
+            </select></label>
         </div>
       </div>
       <div class="stage-bottom" id="barTop" hidden>
+        <span class="mini drag-hint" data-i18n="view.topDrag">Faites glisser le carré bleu pour déplacer le switch.</span>
         <label class="mini slider-inline"><span data-i18n="view.topAngle">Angle du switch</span>
           <input type="range" id="angle" min="0" max="90" step="1" value="0"><output id="angleOut"></output></label>
         <button type="button" class="chip" id="angleAuto" data-i18n="view.topAuto">Auto</button>

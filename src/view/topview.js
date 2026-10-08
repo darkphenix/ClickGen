@@ -5,6 +5,18 @@ import { fmt } from '../ui/i18n.js';
 
 const CHALK = '#eaf3ff';
 
+/** Point dans un ensemble de contours (règle pair-impair : les trous comptent). */
+function insideEvenOdd(polys, x, y) {
+  let inside = false;
+  for (const poly of polys) {
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export class TopView {
   /** @param {HTMLCanvasElement} canvas */
   constructor(canvas) {
@@ -15,10 +27,76 @@ export class TopView {
     this.w = 1;
     this.h = 1;
     this.dpr = 1;
+    this.map = null; // repère écran <-> mm de la dernière image dessinée
+    this.drag = null; // {x, y, ok} pendant un glisser du switch
+    this.onPlace = null; // (x, y) => void, appelé quand on relâche à une position valide
+    this._bindDrag();
     new ResizeObserver(() => { if (this.active) { this._resize(); this.draw(); } }).observe(canvas.parentElement);
   }
 
-  setData(data) { this.data = data; this.draw(); }
+  setData(data) { this.data = data; this.drag = null; this.draw(); }
+
+  _toWorld(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    const m = this.map;
+    return m ? { x: (px - m.ox) / m.s + m.bcx, y: m.bcy - (py - m.oy) / m.s } : null;
+  }
+
+  /** Le point (x, y) est-il sur le carré du switch (bride de 15,6 mm, avec un peu de tolérance) ? */
+  _onSwitch(w) {
+    const pl = this.data?.placement;
+    if (!w || !pl) return false;
+    const a = (pl.angle * Math.PI) / 180;
+    const dx = w.x - pl.x, dy = w.y - pl.y;
+    const u = dx * Math.cos(a) + dy * Math.sin(a), v = -dx * Math.sin(a) + dy * Math.cos(a);
+    return Math.abs(u) <= SWITCH.flange / 2 + 1 && Math.abs(v) <= SWITCH.flange / 2 + 1;
+  }
+
+  /** Le carré de sécurité (relief + parois) tient-il dans le capuchon à cette position ? */
+  _fits(x, y) {
+    const pl = this.data.placement, keep = this.data.keepOut ?? 17.2;
+    const a = (pl.angle * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    const h = keep / 2;
+    // coins et milieux des côtés + quelques points intérieurs
+    const pts = [];
+    for (const u of [-h, -h / 2, 0, h / 2, h]) for (const v of [-h, -h / 2, 0, h / 2, h]) pts.push([x + u * c - v * s, y + u * s + v * c]);
+    return pts.every(([px, py]) => insideEvenOdd(this.data.preview.cap, px, py));
+  }
+
+  _bindDrag() {
+    const c = this.canvas;
+    c.addEventListener('pointerdown', (e) => {
+      if (!this.active || !this.data || e.button !== 0) return;
+      const w = this._toWorld(e);
+      if (!this._onSwitch(w)) return;
+      try { c.setPointerCapture(e.pointerId); } catch { /* pointeur synthétique */ }
+      this.drag = { dx: w.x - this.data.placement.x, dy: w.y - this.data.placement.y, x: this.data.placement.x, y: this.data.placement.y, ok: true, pid: e.pointerId };
+      c.style.cursor = 'grabbing';
+    });
+    c.addEventListener('pointermove', (e) => {
+      if (!this.active || !this.data) return;
+      const w = this._toWorld(e);
+      if (this.drag) {
+        this.drag.x = w.x - this.drag.dx;
+        this.drag.y = w.y - this.drag.dy;
+        this.drag.ok = this._fits(this.drag.x, this.drag.y);
+        this.draw();
+      } else {
+        c.style.cursor = this._onSwitch(w) ? 'grab' : '';
+      }
+    });
+    const end = (e) => {
+      if (!this.drag || this.drag.pid !== e.pointerId) return;
+      const d = this.drag;
+      this.drag = null;
+      c.style.cursor = '';
+      if (d.ok && (Math.abs(d.x - this.data.placement.x) > 0.05 || Math.abs(d.y - this.data.placement.y) > 0.05)) this.onPlace?.(d.x, d.y);
+      else this.draw();
+    };
+    c.addEventListener('pointerup', end);
+    c.addEventListener('pointercancel', end);
+  }
 
   setColors(colors) {
     if (!this.data) return;
@@ -64,6 +142,7 @@ export class TopView {
     const ox = w / 2, oy = padTop + (h - padTop - padBottom) / 2;
     const X = (x) => ox + (x - bcx) * s;
     const Y = (y) => oy - (y - bcy) * s;
+    this.map = { ox, oy, s, bcx, bcy };
 
     // grille de 10 mm (traits forts tous les 50 mm)
     const wx0 = bcx - ox / s, wx1 = bcx + (w - ox) / s, wy0 = bcy - (h - oy) / s, wy1 = bcy + oy / s;
@@ -110,17 +189,19 @@ export class TopView {
     }
 
     // switch : bride 15,6, logement 14,0, broches, croix de la tige
+    const sx = this.drag ? this.drag.x : placement.x, sy = this.drag ? this.drag.y : placement.y;
+    const blue = this.drag && !this.drag.ok ? '#ff5a4f' : '#2a5de8'; // rouge : le switch ne tiendrait pas ici
     ctx.save();
-    ctx.translate(X(placement.x), Y(placement.y));
+    ctx.translate(X(sx), Y(sy));
     ctx.rotate((-placement.angle * Math.PI) / 180);
     const sq = (side) => ctx.strokeRect((-side / 2) * s, (-side / 2) * s, side * s, side * s);
     ctx.setLineDash([5, 4]); ctx.strokeStyle = CHALK; ctx.lineWidth = 1.2; sq(SWITCH.flange);
-    ctx.setLineDash([]); ctx.fillStyle = 'rgba(42,93,232,.28)';
+    ctx.setLineDash([]); ctx.fillStyle = this.drag && !this.drag.ok ? 'rgba(255,90,79,.32)' : 'rgba(42,93,232,.28)';
     ctx.fillRect((-SWITCH.lowerBody / 2) * s, (-SWITCH.lowerBody / 2) * s, SWITCH.lowerBody * s, SWITCH.lowerBody * s);
-    ctx.strokeStyle = '#2a5de8'; ctx.lineWidth = 2; sq(SWITCH.lowerBody);
+    ctx.strokeStyle = blue; ctx.lineWidth = 2; sq(SWITCH.lowerBody);
     ctx.fillStyle = CHALK;
     for (const p of PIN_HOLES) { ctx.beginPath(); ctx.arc(p.x * s, -p.y * s, (p.d / 2) * s, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = '#2a5de8';
+    ctx.fillStyle = blue;
     ctx.fillRect(-2 * s, -0.6 * s, 4 * s, 1.2 * s);
     ctx.fillRect(-0.6 * s, -2 * s, 1.2 * s, 4 * s);
     ctx.restore();

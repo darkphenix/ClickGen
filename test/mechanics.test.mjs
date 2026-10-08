@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { analyzeImage, makeClicker } from '../src/pipeline.js';
 import { DEFAULTS, SWITCH, derive } from '../src/core/params.js';
 import { Scope, getEngine } from '../src/geometry/engine.js';
-import { bearImage } from './helpers.mjs';
+import { bearImage, circle, fillPolygon, heart, newImage, star } from './helpers.mjs';
 
 const p = { ...DEFAULTS };
 const result = await makeClicker(analyzeImage(bearImage(500, true), p), p);
@@ -70,4 +70,26 @@ test('la tige touche le plafond de la croix au repos (le capuchon est bien posé
   assert.ok(Math.abs(stemTop - (d.capRim + d.pocketDepth)) < 1e-9);
   assert.ok(d.capTopRest - SWITCH.travel < d.shellH, 'enfoncé, le capuchon affleure sous le haut de la coque');
   assert.ok(d.capRim - SWITCH.travel > d.cavityFloor, 'le bord du capuchon ne touche pas le plancher de la cavité');
+});
+
+test('le relief du capuchon (14,8 mm) garde au moins 1,1 mm de paroi, sur des formes variées', async () => {
+  const shapes = {
+    ours: bearImage(500, true),
+    etoile: (() => { const i = newImage(500, 500, [0, 0, 0, 0]); fillPolygon(i, star(250, 260, 230, 100), [240, 190, 40, 255]); return i; })(),
+    coeur: (() => { const i = newImage(500, 500, [0, 0, 0, 0]); fillPolygon(i, heart(250, 250, 13), [200, 40, 40, 255]); return i; })(),
+    disque: (() => { const i = newImage(500, 500, [0, 0, 0, 0]); fillPolygon(i, circle(250, 250, 200), [40, 90, 200, 255]); return i; })(),
+  };
+  const sc = new Scope();
+  try {
+    for (const [name, img] of Object.entries(shapes)) {
+      const r = await makeClicker(analyzeImage(img, p), p);
+      const cap = sc.add(wasm.CrossSection.ofPolygons(r.preview.cap, 'EvenOdd'));
+      const side = 14.8 + 2 * 1.1;
+      const sq = sc.add(sc.add(sc.add(wasm.CrossSection.square([side, side], true)).rotate(r.placement.angle)).translate(r.placement.x, r.placement.y));
+      const out = sc.add(sq.subtract(cap)).area();
+      assert.ok(out < 0.01, `${name} : ${out.toFixed(3)} mm² du carré de sécurité sortent du capuchon`);
+    }
+  } finally {
+    sc.dispose();
+  }
 });

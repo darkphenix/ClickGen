@@ -119,3 +119,17 @@ test('cache : un réglage du capuchon ne reconstruit pas la coque, et inversemen
   const fresh = await makeClicker(a, { ...base, socketFit: 0.1, pocketFit: 0.1 });
   assert.equal(fresh.meshes.capBody.volume.toFixed(3), r3.meshes.capBody.volume.toFixed(3));
 });
+
+test('position manuelle du switch : acceptée si elle tient, sinon retour à l\'automatique', async () => {
+  const base = { ...DEFAULTS };
+  const a = analyzeImage(bearImage(500, true), base);
+  const auto = await makeClicker(a, base);
+  const manual = await makeClicker(a, { ...base, placementX: auto.placement.x, placementY: auto.placement.y - 5, placementAngle: 0 });
+  assert.ok(manual.manual);
+  assert.ok(near(manual.placement.y, auto.placement.y - 5, 1e-6));
+  assert.ok(checkMesh(manual.meshes.shell.mesh).watertight && checkMesh(manual.meshes.capBody.mesh).watertight);
+  const bad = await makeClicker(a, { ...base, placementX: 100, placementY: 100, placementAngle: 0 });
+  assert.ok(!bad.manual);
+  assert.ok(bad.warnings.some((w) => w.code === 'manualReset'));
+  assert.ok(Math.hypot(bad.placement.x - auto.placement.x, bad.placement.y - auto.placement.y) < 3, 'retour à la position automatique');
+});
