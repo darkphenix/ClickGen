@@ -7,7 +7,7 @@
 /**
  * @param {Record<string, any>} template contenu de templates/bambu-a1mini.json
  * @param {string[]} colors couleurs des filaments (#rrggbb), une par filament utilisé
- * @param {{supports?:boolean, tower?:{x:number,y:number}|null}} [opts]
+ * @param {{supports?:boolean, tower?:{x:number,y:number}|null, layerHeight?:number}} [opts]
  */
 export function bambuProjectSettings(template, colors, opts = {}) {
   const cfg = structuredClone(template);
@@ -37,6 +37,13 @@ export function bambuProjectSettings(template, colors, opts = {}) {
   cfg.enable_support = opts.supports ? '1' : '0';
   cfg.support_type = 'tree(auto)';
   cfg.support_style = 'default';
+  // hauteur de couche : on garde la même épaisseur de peaux haut et bas (≈ 1,0 et 0,6 mm)
+  if (opts.layerHeight) {
+    const h = opts.layerHeight;
+    cfg.layer_height = String(h);
+    cfg.top_shell_layers = String(Math.max(3, Math.ceil(0.96 / h)));
+    cfg.bottom_shell_layers = String(Math.max(3, Math.ceil(0.6 / h)));
+  }
   // tour de purge : un seul plateau -> une seule position (coin inférieur gauche de la tour)
   if (opts.tower) {
     cfg.wipe_tower_x = [String(+opts.tower.x.toFixed(3))];

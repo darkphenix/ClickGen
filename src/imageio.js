@@ -12,7 +12,7 @@ export async function loadImage(source, name = 'image') {
     const res = await fetch(source);
     if (!res.ok) throw new Error(`Image introuvable (${res.status})`);
     blob = await res.blob();
-    name = source.split('/').pop();
+    if (!name || name === 'image') name = source.startsWith('data:') ? 'image' : source.split('/').pop();
   } else if (source.name) {
     name = source.name;
   }

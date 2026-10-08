@@ -39,6 +39,7 @@ export class Viewer {
     this.svg = svg;
     this.active = true;
     this.showDims = true;
+    this.printLayout = false;
     this.cut = false;
     this.explode = 0;
     this.spring = { x: 0, v: 0, target: 0 };
@@ -67,28 +68,32 @@ export class Viewer {
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
-    r.toneMapping = THREE.NeutralToneMapping;
+    // pas de tone mapping : la couleur affichée doit rester celle du filament choisi
+    r.toneMapping = THREE.NoToneMapping;
     r.localClippingEnabled = true;
     r.setClearColor(0x000000, 0);
 
     const scene = (this.scene = new THREE.Scene());
     const pmrem = new THREE.PMREMGenerator(r);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.8;
+    scene.environmentIntensity = 0.32;
 
     this.camera = new THREE.PerspectiveCamera(30, 1, 1, 2000);
     this.camera.up.set(0, 0, 1);
 
-    const key = new THREE.DirectionalLight(0xffffff, 2.3);
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(70, -90, 140);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, { left: -95, right: 95, top: 95, bottom: -95, near: 10, far: 420 });
     key.shadow.bias = -0.0004;
     key.shadow.normalBias = 0.35;
-    const fill = new THREE.DirectionalLight(0xbcd2ff, 0.55);
+    const fill = new THREE.DirectionalLight(0xbcd2ff, 0.5);
     fill.position.set(-90, 60, 70);
-    scene.add(key, key.target, fill);
+    // contre-jour froid : détache les pièces sombres du fond bleu
+    const rim = new THREE.DirectionalLight(0xcfe2ff, 1.1);
+    rim.position.set(-40, 110, 55);
+    scene.add(key, key.target, fill, rim);
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(520, 520), new THREE.ShadowMaterial({ opacity: 0.38 }));
     ground.position.z = -0.05;
@@ -99,7 +104,7 @@ export class Viewer {
     this.root = new THREE.Group();
     scene.add(this.root);
 
-    const mk = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0 });
+    const mk = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, metalness: 0 });
     this.mats = { shell: mk('#2b2f36'), base: mk('#c9a46a'), switch: mk('#2a5de8'), art: new Map() };
     this.mats.switch.roughness = 0.4;
     this.clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -208,6 +213,9 @@ export class Viewer {
     for (const a of arts) this.capGroup.add(this._mesh(a.mesh, this._artMat(a.index), true));
     this.root.add(this.shellMesh, this.capGroup);
     this._buildSwitch(result.placement, result.dims);
+    this.root.updateMatrixWorld(true);
+    this.shellBox = new THREE.Box3().setFromObject(this.shellMesh);
+    this.capBox = new THREE.Box3().setFromObject(this.capGroup);
     this.meta = {
       dims: result.dims,
       bounds: meshBounds(shell.mesh),
@@ -216,6 +224,7 @@ export class Viewer {
     };
     this.clipPlane.constant = -result.placement.y;
     this._applyCut();
+    this._applyPrintLayout();
     if (!this.framed) this.frame();
     this.dirty = true;
   }
@@ -230,7 +239,7 @@ export class Viewer {
   _artMat(index) {
     let m = this.mats.art.get(index);
     if (!m) {
-      m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6, metalness: 0 });
+      m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.82, metalness: 0 });
       this.mats.art.set(index, m);
     }
     return m;
@@ -271,7 +280,7 @@ export class Viewer {
     stem.add(box(4.0, 1.2, SWITCH.stemAbove, SWITCH.housingTop + SWITCH.stemAbove / 2));
     stem.add(box(1.2, 4.0, SWITCH.stemAbove, SWITCH.housingTop + SWITCH.stemAbove / 2));
     g.add(stem);
-    g.visible = this._switchVisible ?? false;
+    g.visible = !this.printLayout && (this._switchVisible ?? false);
     this.root.add(g);
   }
 
@@ -302,18 +311,44 @@ export class Viewer {
   }
 
   setExplode(v) { this.explode = v; this.dirty = true; }
-  setDims(on) { this.showDims = on; this.svg.style.display = on ? '' : 'none'; this.dirty = true; }
+  setDims(on) { this.showDims = on; this._syncDimsVisibility(); this.dirty = true; }
+  _syncDimsVisibility() { this.svg.style.display = this.showDims && !this.printLayout ? '' : 'none'; }
+
+  /**
+   * Vue « plateau d'impression » : la coque à l'endroit et le capuchon RETOURNÉ à côté (face décor contre
+   * le plateau), tels qu'ils seront imprimés, sans aucun support.
+   */
+  setPrintLayout(on) {
+    this.printLayout = on;
+    this._applyPrintLayout();
+    this._syncDimsVisibility();
+    this.frame();
+  }
+
+  _applyPrintLayout() {
+    if (!this.capGroup) return;
+    if (this.switchGroup) this.switchGroup.visible = !this.printLayout && (this._switchVisible ?? false);
+    if (!this.printLayout) { this.capGroup.rotation.set(0, 0, 0); return; }
+    const sb = this.shellBox, cb = this.capBox;
+    const capW = cb.max.x - cb.min.x;
+    const tx = sb.max.x + 14 + capW / 2;
+    this.capGroup.rotation.set(Math.PI, 0, 0);
+    // rotation de π autour de X : (x, y, z) -> (x, -y, -z) ; on recentre en XY et on pose la face sur z = 0
+    this.capGroup.position.set(tx - (cb.min.x + cb.max.x) / 2, (sb.min.y + sb.max.y) / 2 + (cb.min.y + cb.max.y) / 2, cb.max.z);
+    this.printCenterX = (sb.min.x + tx + capW / 2) / 2;
+    this.printSpan = tx + capW / 2 - sb.min.x;
+  }
   setActive(on) { this.active = on; if (on) { this._resize(); this.dirty = true; } }
 
   /** Cadre la pièce en 3/4 face. */
   frame() {
     if (!this.meta) return;
-    const size = Math.max(this.meta.outline.w, this.meta.outline.h);
+    const size = this.printLayout ? this.printSpan : Math.max(this.meta.outline.w, this.meta.outline.h);
     const fov = (this.camera.fov * Math.PI) / 180;
-    const half = Math.max(size * 0.78, 30);
-    const dist = Math.min(480, (half * 1.2) / Math.tan(fov / 2) / Math.min(1, this.camera.aspect * 1.05));
+    const half = Math.max(size * (this.printLayout ? 0.62 : 0.78), 30);
+    const dist = Math.min(520, (half * 1.2) / Math.tan(fov / 2) / Math.min(1, this.camera.aspect * 1.05));
     const dir = new THREE.Vector3(0.52, -1.0, 0.82).normalize();
-    this.controls.target.set(0, 0, 8);
+    this.controls.target.set(this.printLayout ? this.printCenterX : 0, 0, this.printLayout ? 4 : 8);
     this.camera.position.copy(dir.multiplyScalar(dist)).add(this.controls.target);
     this.controls.update();
     this.framed = true;
@@ -355,8 +390,8 @@ export class Viewer {
   }
 
   _apply() {
-    if (this.capGroup) this.capGroup.position.z = -this.spring.x + this.explode * EXPLODE_MM;
-    if (this.stem) this.stem.position.z = -this.spring.x;
+    if (this.capGroup && !this.printLayout) this.capGroup.position.set(0, 0, -this.spring.x + this.explode * EXPLODE_MM);
+    if (this.stem) this.stem.position.z = this.printLayout ? 0 : -this.spring.x;
   }
 
   // -------------------------------------------------------------------- cotes --
@@ -407,7 +442,7 @@ export class Viewer {
   }
 
   _updateDims() {
-    if (!this.showDims || !this.meta) return;
+    if (!this.showDims || this.printLayout || !this.meta) return;
     const { bounds: bb, dims: d } = this.meta;
     const off = 8;
     const wmm = bb.x1 - bb.x0, hmm = bb.y1 - bb.y0;

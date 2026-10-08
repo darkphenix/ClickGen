@@ -45,7 +45,7 @@ export class TopView {
     if (!this.active || !this.data) return;
     this._resize();
     const { ctx, w, h } = this;
-    const { preview, placement, outline, colors } = this.data;
+    const { preview, placement, outline, colors, keyring } = this.data;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
@@ -53,6 +53,10 @@ export class TopView {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of preview.shell) for (const [x, y] of p) {
       if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (keyring) {
+      x0 = Math.min(x0, keyring.x - keyring.r); x1 = Math.max(x1, keyring.x + keyring.r);
+      y0 = Math.min(y0, keyring.y - keyring.r); y1 = Math.max(y1, keyring.y + keyring.r);
     }
     const padX = 70, padTop = 70, padBottom = 120;
     const s = Math.max(0.5, Math.min((w - 2 * padX) / (x1 - x0), (h - padTop - padBottom) / (y1 - y0)));
@@ -81,6 +85,12 @@ export class TopView {
       }
     };
 
+    // patte porte-clés (derrière la coque)
+    if (keyring) {
+      ctx.beginPath(); ctx.arc(X(keyring.x), Y(keyring.y), keyring.r * s, 0, Math.PI * 2);
+      ctx.fillStyle = colors.shell; ctx.fill(); ctx.strokeStyle = CHALK; ctx.lineWidth = 1.6; ctx.stroke();
+    }
+
     // coque, capuchon, décor : les vraies couleurs, vues de dessus
     ctx.save();
     ctx.shadowColor = 'rgba(0,20,60,.45)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
@@ -92,6 +102,12 @@ export class TopView {
       trace(a.polys); ctx.fillStyle = colors.art[a.index] ?? colors.base; ctx.fill('evenodd');
     }
     trace(preview.cap); ctx.strokeStyle = 'rgba(12,35,79,.55)'; ctx.lineWidth = 1; ctx.stroke();
+
+    if (keyring) { // trou de l'anneau : percé dans le dessin pour laisser voir le fond
+      ctx.save(); ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath(); ctx.arc(X(keyring.x), Y(keyring.y), keyring.hole * s, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.beginPath(); ctx.arc(X(keyring.x), Y(keyring.y), keyring.hole * s, 0, Math.PI * 2); ctx.strokeStyle = CHALK; ctx.lineWidth = 1.2; ctx.stroke();
+    }
 
     // switch : bride 15,6, logement 14,0, broches, croix de la tige
     ctx.save();

@@ -75,12 +75,21 @@ export function bearImage(size = 400, transparent = true) {
   return img;
 }
 
-/** Vérifie qu'un maillage est étanche (chaque arête orientée a son opposée) et renvoie son volume. */
-export function checkMesh(mesh) {
+/**
+ * Vérifie qu'un maillage est une variété fermée (chaque arête orientée a son opposée) et renvoie son volume.
+ * Par défaut on raisonne sur les INDICES, comme le font le 3MF et manifold : deux sommets de même position
+ * mais d'indices différents (pincement où deux régions se touchent en un point) restent distincts.
+ * `weld: true` soude d'abord par position (comportement d'un slicer qui lit un STL).
+ */
+export function checkMesh(mesh, { weld = false } = {}) {
   const { positions: v, indices: t } = mesh;
-  const key = (i) => `${Math.round(v[i * 3] * 1e4)},${Math.round(v[i * 3 + 1] * 1e4)},${Math.round(v[i * 3 + 2] * 1e4)}`;
   const ids = new Map();
-  const vid = (i) => { const k = key(i); if (!ids.has(k)) ids.set(k, ids.size); return ids.get(k); };
+  const vid = (i) => {
+    if (!weld) return i;
+    const k = `${Math.round(v[i * 3] * 1e4)},${Math.round(v[i * 3 + 1] * 1e4)},${Math.round(v[i * 3 + 2] * 1e4)}`;
+    if (!ids.has(k)) ids.set(k, ids.size);
+    return ids.get(k);
+  };
   const edges = new Map();
   let vol = 0, degenerate = 0;
   for (let f = 0; f < t.length; f += 3) {

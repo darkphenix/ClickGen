@@ -10,7 +10,8 @@ import {
 
 /**
  * @param {{width:number,height:number,data:Uint8ClampedArray|Uint8Array}} img RGBA
- * @param {{maskMode?:'auto'|'alpha'|'color', tolerance?:number, invert?:boolean, fillHoles?:boolean}} opts
+ * @param {{maskMode?:'auto'|'alpha'|'color', tolerance?:number, invert?:boolean, fillHoles?:boolean, bgColor?:string|null}} opts
+ *   bgColor : fond imposé (#rrggbb, pipette) ; sinon il est estimé sur les bords de l'image
  * @returns {{w:number,h:number,field:Float32Array,solid:Uint8Array,bounds:{x0:number,y0:number,x1:number,y1:number}|null,mode:string,bg:number[]|null}}
  */
 export function segmentImage(img, opts = {}) {
@@ -22,6 +23,7 @@ export function segmentImage(img, opts = {}) {
   let transparent = 0;
   for (let i = 0; i < n; i++) if (data[i * 4 + 3] < 250) transparent++;
   let mode = opts.maskMode ?? 'auto';
+  if (opts.bgColor) mode = 'color'; // un fond choisi à la pipette impose le détourage par couleur
   if (mode === 'auto') mode = transparent / n > 0.005 ? 'alpha' : 'color';
 
   const fg = new Float32Array(n);
@@ -29,7 +31,7 @@ export function segmentImage(img, opts = {}) {
   if (mode === 'alpha') {
     for (let i = 0; i < n; i++) fg[i] = data[i * 4 + 3] / 255;
   } else {
-    bg = estimateBackground(data, w, h);
+    bg = opts.bgColor ? hexToLab(opts.bgColor) : estimateBackground(data, w, h);
     const lab = [0, 0, 0];
     const ramp = Math.max(3, tol * 0.6);
     for (let i = 0; i < n; i++) {
@@ -80,6 +82,13 @@ function nearFilled(filled, i, w, h) {
   if (y > 0 && filled[i - w]) return true;
   if (y < h - 1 && filled[i + w]) return true;
   return false;
+}
+
+function hexToLab(hex) {
+  const v = parseInt(hex.replace('#', ''), 16);
+  const out = [0, 0, 0];
+  rgbToLab((v >> 16) & 255, (v >> 8) & 255, v & 255, out, 0);
+  return out;
 }
 
 /** Couleur de fond = médiane (Lab) d'un anneau de pixels au bord de l'image. */

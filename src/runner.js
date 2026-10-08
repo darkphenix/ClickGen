@@ -23,7 +23,7 @@ export class Runner {
     const w = this.waiting.get(m.id);
     if (!w) return;
     if (m.type === 'result') { this.waiting.delete(m.id); w.resolve(m); }
-    else if (m.type === 'imageReady') { this.waiting.delete(m.id); w.resolve(m); }
+    else if (m.type === 'imageReady' || m.type === 'coupon') { this.waiting.delete(m.id); w.resolve(m); }
     else if (m.type === 'error') {
       this.waiting.delete(m.id);
       const err = new Error(m.message);
@@ -39,6 +39,15 @@ export class Runner {
     return new Promise((resolve, reject) => {
       this.waiting.set(id, { resolve, reject });
       this.worker.postMessage({ type: 'image', id, width, height, buffer }, [buffer]);
+    });
+  }
+
+  /** Génère le banc d'essai de calibration (maillage unique). */
+  coupon(params) {
+    const id = ++this.seq;
+    return new Promise((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject });
+      this.worker.postMessage({ type: 'coupon', id, params });
     });
   }
 

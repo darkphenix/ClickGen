@@ -31,6 +31,11 @@
         <details class="sec" open>
           <summary data-i18n="img.title">Image</summary>
           <div class="sec-body">
+            <div class="seg" role="tablist" id="srcTabs">
+              <button type="button" role="tab" data-src="image" aria-selected="true" data-i18n="src.image">Image</button>
+              <button type="button" role="tab" data-src="text" aria-selected="false" data-i18n="src.text">Texte</button>
+            </div>
+            <div class="sec-body" id="srcImage">
             <label class="drop" id="drop" tabindex="0">
               <input type="file" id="file" accept="image/*,.svg" hidden>
               <canvas id="thumb" width="320" height="200" aria-hidden="true"></canvas>
@@ -49,11 +54,15 @@
             </div>
             <div class="field">
               <label for="maskMode"><span data-i18n="img.mode">Détourage</span></label>
-              <select id="maskMode" data-param="maskMode">
-                <option value="auto" data-i18n="img.mode.auto">Automatique</option>
-                <option value="alpha" data-i18n="img.mode.alpha">Transparence</option>
-                <option value="color" data-i18n="img.mode.color">Couleur du fond</option>
-              </select>
+              <div class="inline">
+                <select id="maskMode" data-param="maskMode">
+                  <option value="auto" data-i18n="img.mode.auto">Automatique</option>
+                  <option value="alpha" data-i18n="img.mode.alpha">Transparence</option>
+                  <option value="color" data-i18n="img.mode.color">Couleur du fond</option>
+                </select>
+                <button type="button" class="chip" id="pickBg" aria-pressed="false" data-i18n="img.pick" data-i18n-attr="title:img.pickTip">Pipette</button>
+                <button type="button" class="chip" id="clearBg" hidden data-i18n-attr="aria-label:img.pickClear;title:img.pickClear">×</button>
+              </div>
             </div>
             <div class="field" id="toleranceField">
               <label for="tolerance"><span data-i18n="img.tolerance">Tolérance du fond</span><output data-for="tolerance"></output></label>
@@ -64,6 +73,32 @@
               <label class="toggle"><input type="checkbox" data-param="invert"><i></i><span data-i18n="img.invert">Inverser la forme</span></label>
             </div>
             <p class="note" data-i18n="img.hint"></p>
+            </div>
+
+            <div class="sec-body" id="srcText" hidden>
+              <div class="field">
+                <label for="textValue"><span data-i18n="text.label">Votre texte</span></label>
+                <textarea id="textValue" rows="2" maxlength="40" spellcheck="false" placeholder="CLICK"></textarea>
+              </div>
+              <div class="field">
+                <label for="textFont"><span data-i18n="text.font">Police</span></label>
+                <select id="textFont">
+                  <option value="condensed" data-i18n="font.condensed">Condensée</option>
+                  <option value="sans" data-i18n="font.sans">Sans</option>
+                  <option value="rounded" data-i18n="font.rounded">Arrondie</option>
+                  <option value="serif" data-i18n="font.serif">Serif</option>
+                  <option value="mono" data-i18n="font.mono">Mono</option>
+                  <option value="script" data-i18n="font.script">Manuscrite</option>
+                </select>
+              </div>
+              <p class="note" data-i18n="text.hint"></p>
+            </div>
+
+            <div class="row">
+              <button type="button" class="chip" id="saveProject" data-i18n="proj.save">Enregistrer le projet</button>
+              <button type="button" class="chip" id="openProject" data-i18n="proj.open">Ouvrir un projet</button>
+              <input type="file" id="projectFile" accept=".json,application/json" hidden>
+            </div>
           </div>
         </details>
 
@@ -71,24 +106,60 @@
           <summary data-i18n="shape.title">Forme</summary>
           <div class="sec-body">
             <div class="field">
+              <label for="frame"><span data-i18n="shape.frame">Forme du clicker</span></label>
+              <select id="frame" data-param="frame">
+                <option value="image" data-i18n="frame.image">Contour de l’image</option>
+                <option value="circle" data-i18n="frame.circle">Cercle</option>
+                <option value="squircle" data-i18n="frame.squircle">Carré lisse</option>
+                <option value="roundrect" data-i18n="frame.roundrect">Carré arrondi</option>
+                <option value="hexagon" data-i18n="frame.hexagon">Hexagone</option>
+                <option value="octagon" data-i18n="frame.octagon">Octogone</option>
+                <option value="shield" data-i18n="frame.shield">Écusson</option>
+                <option value="pill" data-i18n="frame.pill">Pilule</option>
+              </select>
+            </div>
+            <div class="sec-body" id="frameOpts" hidden>
+              <div class="field">
+                <label for="frameContent"><span data-i18n="shape.frameContent">Contenu du cadre</span></label>
+                <select id="frameContent" data-param="frameContent">
+                  <option value="auto" data-i18n="content.auto">Automatique</option>
+                  <option value="subject" data-i18n="content.subject">Sujet détouré</option>
+                  <option value="full" data-i18n="content.full">Image entière</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="frameZoom"><span data-i18n="shape.frameZoom">Taille du motif</span><output data-for="frameZoom" data-unit="%" data-scale="100"></output></label>
+                <input type="range" id="frameZoom" data-param="frameZoom" min="0.5" max="1.6" step="0.05">
+              </div>
+            </div>
+            <div class="field">
               <label for="size"><span data-i18n="shape.size">Taille de la coque</span><output data-for="size" data-unit="mm"></output></label>
               <input type="range" id="size" data-param="size" min="30" max="150" step="1">
             </div>
             <div class="toggles">
               <label class="toggle"><input type="checkbox" data-param="autoGrow"><i></i><span data-i18n="shape.autoGrow">Agrandir si le switch ne rentre pas</span></label>
-              <label class="toggle"><input type="checkbox" data-param="keepMain"><i></i><span data-i18n="shape.keepMain">Garder la plus grande pièce seulement</span></label>
+              <label class="toggle"><input type="checkbox" data-param="keyring"><i></i><span data-i18n="ring.on">Anneau porte-clés</span></label>
             </div>
-            <div class="field">
-              <label for="smooth"><span data-i18n="shape.smooth">Lissage du contour</span><output data-for="smooth" data-unit="mm" data-digits="1"></output></label>
-              <input type="range" id="smooth" data-param="smooth" min="0" max="3" step="0.1">
+            <div class="field" id="ringAngleField" hidden>
+              <label for="keyringAngle"><span data-i18n="ring.angle">Position de l’anneau</span><output data-for="keyringAngle" data-unit="°"></output></label>
+              <input type="range" id="keyringAngle" data-param="keyringAngle" min="0" max="359" step="1">
             </div>
-            <div class="field">
-              <label for="minDetail"><span data-i18n="shape.minDetail">Détail minimum</span><output data-for="minDetail" data-unit="mm" data-digits="1"></output></label>
-              <input type="range" id="minDetail" data-param="minDetail" min="0" max="4" step="0.1">
-            </div>
-            <div class="field">
-              <label for="closeGap"><span data-i18n="shape.closeGap">Combler les fentes</span><output data-for="closeGap" data-unit="mm" data-digits="1"></output></label>
-              <input type="range" id="closeGap" data-param="closeGap" min="0" max="4" step="0.1">
+            <div class="sec-body" id="outlineOpts">
+              <div class="toggles">
+                <label class="toggle"><input type="checkbox" data-param="keepMain"><i></i><span data-i18n="shape.keepMain">Garder la plus grande pièce seulement</span></label>
+              </div>
+              <div class="field">
+                <label for="smooth"><span data-i18n="shape.smooth">Lissage du contour</span><output data-for="smooth" data-unit="mm" data-digits="1"></output></label>
+                <input type="range" id="smooth" data-param="smooth" min="0" max="3" step="0.1">
+              </div>
+              <div class="field">
+                <label for="minDetail"><span data-i18n="shape.minDetail">Détail minimum</span><output data-for="minDetail" data-unit="mm" data-digits="1"></output></label>
+                <input type="range" id="minDetail" data-param="minDetail" min="0" max="4" step="0.1">
+              </div>
+              <div class="field">
+                <label for="closeGap"><span data-i18n="shape.closeGap">Combler les fentes</span><output data-for="closeGap" data-unit="mm" data-digits="1"></output></label>
+                <input type="range" id="closeGap" data-param="closeGap" min="0" max="4" step="0.1">
+              </div>
             </div>
           </div>
         </details>
@@ -154,7 +225,11 @@
               </select>
             </div>
             <p class="note" data-i18n="fit.hint"></p>
-            <button type="button" class="chip" id="resetFit" data-i18n="fit.reset">Valeurs par défaut</button>
+            <div class="row">
+              <button type="button" class="chip" id="coupon" data-i18n="fit.coupon">Banc d’essai à imprimer</button>
+              <button type="button" class="chip" id="resetFit" data-i18n="fit.reset">Valeurs par défaut</button>
+            </div>
+            <p class="note" data-i18n="fit.couponHint"></p>
           </div>
         </details>
 
@@ -166,6 +241,15 @@
               <select id="bed" data-param="bed" data-number>
                 <option value="180" data-i18n="print.a1mini">Bambu Lab A1 mini (180 mm)</option>
                 <option value="256" data-i18n="print.big">Autre Bambu / Orca (256 mm)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="layerHeight"><span data-i18n="print.layer">Hauteur de couche</span></label>
+              <select id="layerHeight" data-param="layerHeight" data-number>
+                <option value="0.12" data-i18n="layer.fine">0,12 mm : très fin</option>
+                <option value="0.16" data-i18n="layer.quality">0,16 mm : qualité</option>
+                <option value="0.2" data-i18n="layer.standard">0,20 mm : standard</option>
+                <option value="0.28" data-i18n="layer.fast">0,28 mm : rapide</option>
               </select>
             </div>
             <p class="note" data-i18n="print.hint"></p>
@@ -207,6 +291,7 @@
           <label class="toggle sm"><input type="checkbox" id="tSwitch"><i></i><span data-i18n="view.switch">Switch</span></label>
           <label class="toggle sm"><input type="checkbox" id="tCut"><i></i><span data-i18n="view.cut">Coupe</span></label>
           <label class="toggle sm"><input type="checkbox" id="tDims" checked><i></i><span data-i18n="view.dims">Cotes</span></label>
+          <label class="toggle sm"><input type="checkbox" id="tPrint"><i></i><span data-i18n="view.print">Plateau</span></label>
           <label class="toggle sm"><input type="checkbox" id="tSound" checked><i></i><span data-i18n="view.sound">Son</span></label>
         </div>
       </div>

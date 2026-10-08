@@ -29,6 +29,12 @@ export const DEFAULTS = Object.freeze({
   minDetail: 1.2, // supprime les détails plus fins que ça (mm)
   smooth: 0.5, // lissage du contour (mm)
 
+  // --- Cadre (à la place du contour de l'image) -------------------------------
+  frame: 'image', // image | circle | squircle | roundrect | hexagon | octagon | shield | pill
+  frameContent: 'auto', // auto | subject (sujet détouré) | full (image entière)
+  frameZoom: 1, // taille du motif dans le cadre
+  bgColor: null, // fond choisi à la pipette (#rrggbb) ; null = détecté sur les bords
+
   // --- Couleurs ----------------------------------------------------------
   colorCount: 3, // couleurs d'image (1 = capuchon uni)
   artDepth: 0.8, // épaisseur de la couche de décor (mm)
@@ -50,6 +56,7 @@ export const DEFAULTS = Object.freeze({
 
   // --- Impression --------------------------------------------------------
   bed: 180, // plateau carré (mm) : A1 mini = 180, A1/P1/X1 = 256
+  layerHeight: 0.16, // mm, appliqué au 3MF (0,12 / 0,16 / 0,20 / 0,28)
 });
 
 /** Broches d'un switch MX vu de dessus (mm, par rapport au centre) : plot, ergots, pattes. */

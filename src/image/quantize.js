@@ -1,4 +1,8 @@
 // Réduction de l'image à N couleurs (k-means en Lab) pour le décor multi-filaments.
+//
+// Rapide : on ne travaille pas pixel par pixel mais sur les couleurs DISTINCTES (clés RGB 5 bits par
+// canal, 32 768 au plus), pondérées par leur nombre de pixels. La couleur finale de chaque groupe est
+// la médiane des vrais pixels : l'anticrénelage (minoritaire) ne la déplace pas.
 
 import { rgbToLab } from './raster.js';
 
@@ -6,49 +10,57 @@ const OUTSIDE = 255;
 
 /**
  * @param {{width:number,height:number,data:ArrayLike<number>}} img RGBA
- * @param {Uint8Array} inside 1 = pixel dans la silhouette
+ * @param {Uint8Array} inside 1 = pixel à colorier
  * @param {number} k nombre de couleurs demandé
+ * @param {{mergeDeltaE?:number, reserveBase?:boolean, rect?:{x0:number,y0:number,x1:number,y1:number}|null, baseRgb?:number[]}} [opts]
+ *   reserveBase : l'indice 0 est réservé au FOND (pixels du cadre hors de `inside`), les couleurs de
+ *   l'image prennent les indices 1..k. Utilisé quand le sujet se détache d'un fond transparent.
  * @returns {{labels:Uint8Array, colors:{hex:string, rgb:number[], area:number}[], outside:number}}
  */
 export function quantizeColors(img, inside, k, opts = {}) {
   const { width: w, height: h, data } = img;
   const n = w * h;
   const mergeDE = opts.mergeDeltaE ?? 9;
-
-  // Lab des pixels intérieurs (composés sur blanc)
-  const idx = [];
-  for (let i = 0; i < n; i++) if (inside[i]) idx.push(i);
-  const labAll = new Float32Array(idx.length * 3);
-  const tmp = [0, 0, 0];
-  for (let j = 0; j < idx.length; j++) {
-    const i = idx[j];
-    const a = data[i * 4 + 3] / 255;
-    rgbToLab(
-      Math.round(data[i * 4] * a + 255 * (1 - a)),
-      Math.round(data[i * 4 + 1] * a + 255 * (1 - a)),
-      Math.round(data[i * 4 + 2] * a + 255 * (1 - a)),
-      tmp, 0,
-    );
-    labAll[j * 3] = tmp[0]; labAll[j * 3 + 1] = tmp[1]; labAll[j * 3 + 2] = tmp[2];
-  }
-
-  const labels = new Uint8Array(n).fill(OUTSIDE);
-  if (idx.length === 0) return { labels, colors: [], outside: OUTSIDE };
   k = Math.max(1, Math.min(8, Math.round(k)));
 
-  // échantillon réduit
-  const step = Math.max(1, Math.floor(idx.length / 20000));
-  const sample = [];
-  for (let j = 0; j < idx.length; j += step) sample.push(j);
+  // 1) clé de couleur de chaque pixel intérieur + histogramme
+  const keyOf = new Uint16Array(n);
+  const hist = new Uint32Array(32768);
+  let count = 0;
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    let r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    const a = data[i * 4 + 3];
+    if (a < 128) { const t = a / 255; r = r * t + 255 * (1 - t); g = g * t + 255 * (1 - t); b = b * t + 255 * (1 - t); }
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    keyOf[i] = key;
+    hist[key]++;
+    count++;
+  }
+  const labels = new Uint8Array(n).fill(OUTSIDE);
+  if (!count) return { labels, colors: [], outside: OUTSIDE };
 
-  const centers = kmeansPP(labAll, sample, k);
-  // Lloyd
-  for (let iter = 0; iter < 16; iter++) {
+  // 2) couleurs distinctes -> Lab (au centre du casier)
+  const keys = [];
+  for (let c = 0; c < 32768; c++) if (hist[c]) keys.push(c);
+  const m = keys.length;
+  const lab = new Float32Array(m * 3);
+  const wt = new Float64Array(m);
+  const tmp = [0, 0, 0];
+  for (let j = 0; j < m; j++) {
+    const c = keys[j];
+    rgbToLab(((c >> 10) & 31) * 8 + 4, ((c >> 5) & 31) * 8 + 4, (c & 31) * 8 + 4, tmp, 0);
+    lab[j * 3] = tmp[0]; lab[j * 3 + 1] = tmp[1]; lab[j * 3 + 2] = tmp[2];
+    wt[j] = hist[c];
+  }
+
+  // 3) k-means++ pondéré, puis Lloyd
+  const centers = kmeansPP(lab, wt, m, k);
+  for (let iter = 0; iter < 20; iter++) {
     const sum = centers.map(() => [0, 0, 0, 0]);
-    for (const j of sample) {
-      const c = nearest(centers, labAll, j);
-      const s = sum[c];
-      s[0] += labAll[j * 3]; s[1] += labAll[j * 3 + 1]; s[2] += labAll[j * 3 + 2]; s[3]++;
+    for (let j = 0; j < m; j++) {
+      const s = sum[nearest(centers, lab, j)];
+      s[0] += lab[j * 3] * wt[j]; s[1] += lab[j * 3 + 1] * wt[j]; s[2] += lab[j * 3 + 2] * wt[j]; s[3] += wt[j];
     }
     let moved = 0;
     for (let c = 0; c < centers.length; c++) {
@@ -60,7 +72,7 @@ export function quantizeColors(img, inside, k, opts = {}) {
     if (moved < 0.05) break;
   }
 
-  // fusion des centres trop proches
+  // 4) fusion des centres trop proches
   let merged = true;
   while (merged && centers.length > 1) {
     merged = false;
@@ -76,65 +88,84 @@ export function quantizeColors(img, inside, k, opts = {}) {
     }
   }
 
-  // affectation de tous les pixels
-  const lab = new Uint8Array(n).fill(OUTSIDE);
-  for (let j = 0; j < idx.length; j++) lab[idx[j]] = nearest(centers, labAll, j);
+  // 5) étiquette de chaque couleur distincte, puis de chaque pixel
+  const labelOfKey = new Uint8Array(32768);
+  for (let j = 0; j < m; j++) labelOfKey[keys[j]] = nearest(centers, lab, j);
+  const lab8 = new Uint8Array(n).fill(OUTSIDE);
+  for (let i = 0; i < n; i++) if (inside[i]) lab8[i] = labelOfKey[keyOf[i]];
 
-  // filtre majoritaire 3x3 (supprime liserés d'anticrénelage et poussières)
-  majorityFilter(lab, w, h, centers.length, 2);
+  // 6) filtre majoritaire 3 x 3 : supprime liserés d'anticrénelage et poussières
+  majorityFilter(lab8, w, h, centers.length, 2);
 
-  // surfaces, tri par taille décroissante, suppression des clusters quasi vides
-  // La couleur d'un cluster est la MÉDIANE de ses pixels : les pixels d'anticrénelage (minoritaires)
-  // ne déplacent pas la teinte, contrairement à une moyenne.
+  // 7) surfaces, couleur médiane de chaque groupe, tri par taille décroissante
   const counts = new Array(centers.length).fill(0);
   const members = centers.map(() => [[], [], []]);
-  const memberStep = Math.max(1, Math.floor(idx.length / 40000));
-  for (let j = 0; j < idx.length; j++) {
-    const i = idx[j], c = lab[i];
+  const step = Math.max(1, Math.floor(count / 40000));
+  let seen = 0;
+  for (let i = 0; i < n; i++) {
+    const c = lab8[i];
     if (c === OUTSIDE) continue;
     counts[c]++;
-    if (j % memberStep === 0) {
+    if (seen++ % step === 0) {
       members[c][0].push(data[i * 4]); members[c][1].push(data[i * 4 + 1]); members[c][2].push(data[i * 4 + 2]);
     }
   }
   const median = (arr) => { if (!arr.length) return 0; arr.sort((a, b) => a - b); return arr[arr.length >> 1]; };
-  const rgbMed = members.map((m) => m.map(median));
-  const order = counts.map((a, c) => c).filter((c) => counts[c] >= idx.length * 0.003).sort((a, b) => counts[b] - counts[a]);
-  if (order.length === 0) order.push(counts.indexOf(Math.max(...counts)));
+  const rgbMed = members.map((mm) => mm.map(median));
+  const order = counts.map((_, c) => c).filter((c) => counts[c] >= count * 0.003).sort((a, b) => counts[b] - counts[a]);
+  if (!order.length) order.push(counts.indexOf(Math.max(...counts)));
   const remap = new Uint8Array(centers.length).fill(OUTSIDE);
   order.forEach((c, r) => (remap[c] = r));
-  // les pixels des clusters supprimés vont au cluster survivant le plus proche
-  const dropped = counts.map((_, c) => c).filter((c) => remap[c] === OUTSIDE);
-  for (const c of dropped) {
+  // les pixels des groupes supprimés vont au groupe conservé le plus proche
+  for (let c = 0; c < centers.length; c++) {
+    if (remap[c] !== OUTSIDE) continue;
     let bestR = 0, bestD = Infinity;
     order.forEach((o, r) => { const d = dE(centers[c], centers[o]); if (d < bestD) { bestD = d; bestR = r; } });
     remap[c] = bestR;
   }
-  for (let i = 0; i < n; i++) if (lab[i] !== OUTSIDE) lab[i] = remap[lab[i]];
+  for (let i = 0; i < n; i++) if (lab8[i] !== OUTSIDE) lab8[i] = remap[lab8[i]];
+  let colors = order.map((c) => ({ rgb: rgbMed[c], hex: toHex(rgbMed[c]), area: counts[c] }));
 
-  const colors = order.map((c) => ({ rgb: rgbMed[c], hex: toHex(rgbMed[c]), area: counts[c] }));
-  return { labels: lab, colors, outside: OUTSIDE };
+  // 8) fond réservé : indice 0 = tout ce qui est dans le cadre mais hors du sujet
+  if (opts.reserveBase) {
+    const rect = opts.rect ?? { x0: 0, y0: 0, x1: w, y1: h };
+    let baseArea = 0;
+    for (let y = rect.y0; y < rect.y1; y++) {
+      for (let x = rect.x0; x < rect.x1; x++) {
+        const i = y * w + x;
+        if (lab8[i] === OUTSIDE) { labels[i] = 0; baseArea++; } else labels[i] = lab8[i] + 1;
+      }
+    }
+    const baseRgb = opts.baseRgb ?? [255, 255, 255];
+    colors = [{ rgb: baseRgb, hex: toHex(baseRgb), area: baseArea }, ...colors];
+    return { labels, colors, outside: OUTSIDE };
+  }
+  return { labels: lab8, colors, outside: OUTSIDE };
 }
 
-function kmeansPP(lab, sample, k) {
+function kmeansPP(lab, wt, m, k) {
   let seed = 1234567;
   const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
   const pick = (j) => [lab[j * 3], lab[j * 3 + 1], lab[j * 3 + 2]];
-  const centers = [pick(sample[Math.floor(rnd() * sample.length)])];
-  const d2 = new Float64Array(sample.length).fill(Infinity);
+  let total = 0;
+  for (let j = 0; j < m; j++) total += wt[j];
+  // premier centre : couleur la plus fréquente (déterministe et stable)
+  let first = 0;
+  for (let j = 1; j < m; j++) if (wt[j] > wt[first]) first = j;
+  const centers = [pick(first)];
+  const d2 = new Float64Array(m).fill(Infinity);
   while (centers.length < k) {
     const last = centers[centers.length - 1];
-    let total = 0;
-    for (let s = 0; s < sample.length; s++) {
-      const j = sample[s];
+    let sum = 0;
+    for (let j = 0; j < m; j++) {
       const dx = lab[j * 3] - last[0], dy = lab[j * 3 + 1] - last[1], dz = lab[j * 3 + 2] - last[2];
-      d2[s] = Math.min(d2[s], dx * dx + dy * dy + dz * dz);
-      total += d2[s];
+      d2[j] = Math.min(d2[j], dx * dx + dy * dy + dz * dz);
+      sum += d2[j] * wt[j];
     }
-    if (total <= 1e-6) break; // image quasi unie
-    let r = rnd() * total, s = 0;
-    for (; s < sample.length - 1; s++) { r -= d2[s]; if (r <= 0) break; }
-    centers.push(pick(sample[s]));
+    if (sum <= 1e-6) break; // image quasi unie
+    let r = rnd() * sum, j = 0;
+    for (; j < m - 1; j++) { r -= d2[j] * wt[j]; if (r <= 0) break; }
+    centers.push(pick(j));
   }
   return centers;
 }
@@ -160,7 +191,10 @@ function majorityFilter(lab, w, h, k, passes) {
     for (let y = 1; y < h - 1; y++) {
       for (let x = 1; x < w - 1; x++) {
         const i = y * w + x;
-        if (src[i] === OUTSIDE) continue;
+        const c0 = src[i];
+        if (c0 === OUTSIDE) continue;
+        // raccourci : un pixel dont les 4 voisins directs ont la même étiquette ne change pas
+        if (src[i - 1] === c0 && src[i + 1] === c0 && src[i - w] === c0 && src[i + w] === c0) continue;
         votes.fill(0);
         let any = false;
         for (let dy = -1; dy <= 1; dy++) {
@@ -170,15 +204,15 @@ function majorityFilter(lab, w, h, k, passes) {
           }
         }
         if (!any) continue;
-        let best = src[i], bv = votes[best];
+        let best = c0, bv = votes[best];
         for (let c = 0; c < k; c++) if (votes[c] > bv) { bv = votes[c]; best = c; }
         // changement seulement si majorité nette (≥ 5 voisins sur 9)
-        if (best !== src[i] && bv >= 5) lab[i] = best;
+        if (best !== c0 && bv >= 5) lab[i] = best;
       }
     }
   }
 }
 
 export function toHex(rgb) {
-  return '#' + rgb.map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+  return '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
 }

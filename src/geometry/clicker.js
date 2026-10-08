@@ -52,7 +52,17 @@ export function buildClicker(wasm, scope, S, cap, placement, art, p) {
   );
   const collar = T(T(T(S.subtract(pocket)).extrude(MECH.collarH)).translate(0, 0, d.seat));
   const ring = T(T(T(S.subtract(cavity)).extrude(d.shellH - d.cavityFloor)).translate(0, 0, d.cavityFloor));
-  const shell = T(Manifold.union([floorSlab, collar, ring]));
+  let shell = T(Manifold.union([floorSlab, collar, ring]));
+
+  // anneau porte-clés : une patte plate fixée au pied de la coque, percée d'un trou pour un anneau
+  let keyring = null;
+  if (p.keyring) {
+    const [lx, ly] = lugCenter(S.toPolygons(), S.bounds(), p.keyringAngle);
+    const lug = T(T(T(CrossSection.circle(LUG.radius, 64)).translate(lx, ly)).extrude(LUG.height));
+    const hole = T(T(T(T(CrossSection.circle(LUG.hole, 48)).translate(lx, ly)).extrude(LUG.height + 2)).translate(0, 0, -1));
+    shell = T(T(Manifold.union([shell, lug])).subtract(hole));
+    keyring = { x: lx, y: ly, r: LUG.radius, hole: LUG.hole };
+  }
 
   // ---- capuchon (repère local : bord à z = 0, face décor à z = capH) --------------------
   let body = extrudeChamfer(wasm, T, cap, d.capH, 0, p.chamfer);
@@ -103,7 +113,34 @@ export function buildClicker(wasm, scope, S, cap, placement, art, p) {
   for (const [name, m] of [['coque', shell], ['capuchon', capBody]]) {
     if (m.isEmpty() || m.status() !== 'NoError') throw new Error(`maillage ${name} invalide (${m.status()})`);
   }
-  return { shell, capBody, arts: artMeshes, dims: d, warnings };
+  return { shell, capBody, arts: artMeshes, dims: d, warnings, keyring };
+}
+
+/** Patte porte-clés (mm) : disque de rayon `radius`, épaisseur `height`, trou de rayon `hole` (anneau de 3 mm). */
+const LUG = { radius: 4.4, height: 3.6, hole: 1.8, offset: 3.2 };
+
+/**
+ * Centre de la patte : sur le contour de la coque, dans la direction `angleDeg` (0 = +x, 90 = +y) depuis le
+ * centre de la boîte englobante ; on prend la sortie la plus lointaine du rayon, puis on avance de `offset`.
+ */
+function lugCenter(polys, b, angleDeg) {
+  const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2;
+  const ux = Math.cos((angleDeg * Math.PI) / 180), uy = Math.sin((angleDeg * Math.PI) / 180);
+  let tMax = 0;
+  for (const poly of polys) {
+    for (let i = 0, n = poly.length; i < n; i++) {
+      const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % n];
+      const ex = bx - ax, ey = by - ay;
+      const den = ux * ey - uy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((ax - cx) * ey - (ay - cy) * ex) / den; // distance le long du rayon
+      const sEdge = ((ax - cx) * uy - (ay - cy) * ux) / den; // position sur l'arête
+      if (t > tMax && sEdge >= -1e-9 && sEdge <= 1 + 1e-9) tMax = t;
+    }
+  }
+  if (tMax === 0) tMax = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) / 2;
+  const t = tMax + LUG.offset;
+  return [cx + ux * t, cy + uy * t];
 }
 
 /** Convertit le résultat de buildClicker en maillages indépendants de la mémoire WASM. */
@@ -114,6 +151,7 @@ export function clickerToMeshes(res) {
     arts: res.arts.map((a) => ({ index: a.index, mesh: toMesh(a.manifold), volume: a.manifold.volume() })),
     dims: res.dims,
     warnings: res.warnings,
+    keyring: res.keyring,
   };
 }
 
