@@ -406,7 +406,8 @@ async function runNow() {
 }
 
 function onError(e) {
-  console.error(e.workerStack || e);
+  // un refus normal (forme introuvable, trop fine, ne tient pas) n'est pas un bogue : pas de trace rouge
+  (['empty', 'vanished', 'nofit'].includes(e.code) ? console.info : console.error)(e.workerStack || e);
   const key = { empty: 'msg.empty', vanished: 'msg.vanished', nofit: 'msg.nofit', geometry: 'msg.geometry', timeout: 'msg.timeout' }[e.code] ?? 'msg.internal';
   const x = e.extra ?? {};
   store.msgs = [{ kind: 'error', key, vars: {
@@ -516,7 +517,7 @@ function renderStats() {
   const rows = [
     [t('stat.shell'), `${fmt(r.outline.w)} × ${fmt(r.outline.h)} × ${fmt(d.shellH)} mm`],
     [t('stat.cap'), `${fmt(d.capH)} mm`],
-    [t('stat.height'), `${fmt(d.capTopRest)} mm ${t('stat.rest')}, ${fmt(d.shellH)} ${t('stat.pressed')}`],
+    [t('stat.height'), `${fmt(d.capTopRest + (r.relief ?? 0))} mm ${t('stat.rest')}, ${fmt(d.shellH)} ${t('stat.pressed')}`],
     [t('stat.switch'), `MX 14,0 mm, ${fmt(r.placement.angle, 0)}°`],
     [t('stat.filaments'), String(assignedFilaments().filaments.length)],
     [t('stat.mass'), t('stat.massValue', { g: fmt(grams, 0) })],

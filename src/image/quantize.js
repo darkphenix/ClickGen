@@ -12,9 +12,10 @@ const OUTSIDE = 255;
  * @param {{width:number,height:number,data:ArrayLike<number>}} img RGBA
  * @param {Uint8Array} inside 1 = pixel à colorier
  * @param {number} k nombre de couleurs demandé
- * @param {{mergeDeltaE?:number, reserveBase?:boolean, rect?:{x0:number,y0:number,x1:number,y1:number}|null, baseRgb?:number[]}} [opts]
+ * @param {{mergeDeltaE?:number, reserveBase?:boolean, rect?:{x0:number,y0:number,x1:number,y1:number}|null, baseRgb?:number[], clearAsWhite?:boolean}} [opts]
  *   reserveBase : l'indice 0 est réservé au FOND (pixels du cadre hors de `inside`), les couleurs de
  *   l'image prennent les indices 1..k. Utilisé quand le sujet se détache d'un fond transparent.
+ *   clearAsWhite : les pixels transparents comptent comme du blanc (image entière sans détourage).
  * @returns {{labels:Uint8Array, colors:{hex:string, rgb:number[], area:number}[], outside:number}}
  */
 export function quantizeColors(img, inside, k, opts = {}) {
@@ -27,9 +28,12 @@ export function quantizeColors(img, inside, k, opts = {}) {
   // Un pixel transparent à l'intérieur de la silhouette (trou comblé) n'a pas de couleur : il ne vote pas
   // et prend la couleur de base. Sinon son RGB brut (0, 0, 0) donnait un « noir » fantôme à la médiane,
   // ou le blanc de la composition occupait l'une des couleurs demandées.
+  // Exception (`clearAsWhite`) : quand toute l'image est le décor (cadre « image entière »), la
+  // transparence est le fond de l'image, vu comme sur une page blanche.
   let opaque = 0;
   for (let i = 0; i < n; i++) if (inside[i] && data[i * 4 + 3] >= 128) opaque++;
-  const votes = (i) => inside[i] && (opaque === 0 || data[i * 4 + 3] >= 128); // opaque === 0 : image entièrement translucide
+  const skipClear = !opts.clearAsWhite && opaque > 0; // opaque === 0 : image entièrement translucide, on garde tout
+  const votes = (i) => inside[i] && (!skipClear || data[i * 4 + 3] >= 128);
   const keyOf = new Uint16Array(n);
   const hist = new Uint32Array(32768);
   let count = 0;
@@ -113,7 +117,11 @@ export function quantizeColors(img, inside, k, opts = {}) {
     if (c === OUTSIDE) continue;
     counts[c]++;
     if (seen++ % step === 0) {
-      members[c][0].push(data[i * 4]); members[c][1].push(data[i * 4 + 1]); members[c][2].push(data[i * 4 + 2]);
+      // même composition sur blanc que pour la classification (étape 1), sinon le RGB brut d'un pixel
+      // transparent (0, 0, 0) ferait un groupe « blanc » de couleur noire
+      const a = data[i * 4 + 3];
+      const t = a < 128 ? a / 255 : 1;
+      for (let ch = 0; ch < 3; ch++) members[c][ch].push(data[i * 4 + ch] * t + 255 * (1 - t));
     }
   }
   const median = (arr) => { if (!arr.length) return 0; arr.sort((a, b) => a - b); return arr[arr.length >> 1]; };

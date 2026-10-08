@@ -60,7 +60,7 @@ function analyzeFramed(img, p) {
   const subject = !!seg?.bounds && (p.frameContent === 'subject' || (p.frameContent === 'auto' && seg.mode === 'alpha'));
   const rect = subject ? seg.bounds : { x0: 0, y0: 0, x1: w, y1: h };
   const inside = subject ? seg.solid : new Uint8Array(w * h).fill(1);
-  const quant = quantizeColors(img, inside, p.colorCount, { reserveBase: subject, rect });
+  const quant = quantizeColors(img, inside, p.colorCount, { reserveBase: subject, rect, clearAsWhite: !subject });
   const artLoops = quant.colors.map((_, i) => (i === 0 && subject ? null : i === 0 ? null : traceLabel(quant.labels, i, w, h)));
   const loops = [[[rect.x0, rect.y0], [rect.x1, rect.y0], [rect.x1, rect.y1], [rect.x0, rect.y1]]];
   // enveloppe convexe du sujet : sert à l'ajuster dans le cadre sans rogner ses extrémités (oreilles, queue…)
@@ -336,6 +336,7 @@ export async function makeClicker(a, p, opts = {}) {
       size: finalSize,
       grown,
       framed,
+      relief: meshes.arts.length ? p.relief : 0, // saillie réelle du décor au-dessus de la face du capuchon
       manual: !!best.manual,
       keyring: meshes.keyring ?? null,
       outline: { w: b.max[0] - b.min[0], h: b.max[1] - b.min[1] },

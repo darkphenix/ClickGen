@@ -71,6 +71,20 @@ test('couleurs : un trou transparent bouché ne devient ni noir ni blanc, il pre
   }
 });
 
+test('couleurs : image entière (clearAsWhite) : la transparence est le fond blanc de l\'image', () => {
+  // moitié gauche rouge opaque, moitié droite transparente
+  const W = 200;
+  const img = newImage(W, W, [0, 0, 0, 0]);
+  for (let y = 0; y < W; y++) for (let x = 0; x < W / 2; x++) img.data.set([200, 30, 30, 255], (y * W + x) * 4);
+  const all = new Uint8Array(W * W).fill(1);
+  const asWhite = quantizeColors(img, all, 2, { clearAsWhite: true });
+  assert.ok(asWhite.colors.some((c) => c.rgb.every((v) => v > 240)), 'un blanc, comme sur une page');
+  assert.equal(asWhite.labels[100 * W + 150] !== asWhite.outside, true, 'la transparence est coloriée');
+  const asHole = quantizeColors(img, all, 2);
+  assert.equal(asHole.colors.length, 1, 'sans l\'option, elle ne vote pas');
+  assert.equal(asHole.labels[100 * W + 150], asHole.outside);
+});
+
 test('SVG : dimensions lues sur la balise racine, jamais NaN ni nulles', () => {
   assert.deepEqual(svgSize('<svg xmlns="x" viewBox="0 0 24 32"><path/></svg>'), [24, 32]);
   assert.deepEqual(svgSize('<svg viewBox="10, 20, 100, 50">'), [100, 50], 'virgules et espaces');

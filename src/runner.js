@@ -1,10 +1,14 @@
 // Côté page : pilote le worker de calcul. Un nouvel appel à run() annule le précédent (résultat ignoré).
 //
-// Garde-fou : un calcul qui ne donne plus signe de vie pendant STALL_MS (boucle sans fin sur une forme
+// Garde-fou : un calcul qui ne donne plus signe de vie pendant `stallMs` (boucle sans fin sur une forme
 // pathologique, WASM à court de mémoire…) ne doit pas figer l'application. Le worker est alors tué et
 // recréé, l'image lui est renvoyée, et les demandes en attente échouent avec un code « timeout ».
+// Si le worker échoue encore et encore (script introuvable, module non pris en charge…), on cesse de le
+// recréer : toutes les demandes suivantes échouent tout de suite avec la dernière erreur.
 
 const STALL_MS = 45000;
+const MAX_RESTARTS = 3; // pas plus de 3 recréations en RESTART_WINDOW_MS
+const RESTART_WINDOW_MS = 20000;
 
 export class Superseded extends Error {
   constructor() {
@@ -18,7 +22,10 @@ export class Runner {
     this.seq = 0;
     this.waiting = new Map(); // id -> {resolve, reject, isRun}
     this.image = null; // dernière image envoyée, pour réarmer un worker recréé
+    this.stallMs = STALL_MS;
     this.stallTimer = 0;
+    this.restarts = []; // dates des recréations récentes
+    this.broken = null; // erreur définitive : le worker n'est plus recréé
     this.#spawn();
   }
 
@@ -40,6 +47,10 @@ export class Runner {
     const pending = [...this.waiting.values()];
     this.waiting.clear();
     for (const w of pending) w.reject(err);
+    const now = Date.now();
+    this.restarts = this.restarts.filter((t) => now - t < RESTART_WINDOW_MS);
+    if (this.restarts.length >= MAX_RESTARTS) { this.broken = err; return; }
+    this.restarts.push(now);
     this.#spawn();
     if (this.image) this.#sendImage(this.image, ++this.seq);
   }
@@ -57,22 +68,24 @@ export class Runner {
     this.stallTimer = setTimeout(() => {
       this.stallTimer = 0;
       this.#restart(Object.assign(new Error('Le calcul a été arrêté (trop long).'), { code: 'timeout' }));
-    }, STALL_MS);
+    }, this.stallMs);
   }
 
   #onMessage(m) {
-    if (m.type === 'progress') { this.#watch(true); return; } // signe de vie : le worker avance
-    const w = this.waiting.get(m.id);
-    if (!w) return;
-    if (m.type === 'result') { this.waiting.delete(m.id); w.resolve(m); }
-    else if (m.type === 'imageReady' || m.type === 'coupon') { this.waiting.delete(m.id); w.resolve(m); }
-    else if (m.type === 'error') {
+    try {
+      const w = m.type === 'progress' ? null : this.waiting.get(m.id);
+      if (!w) return; // progression, ou réponse à une demande déjà remplacée
       this.waiting.delete(m.id);
-      const err = new Error(m.message);
-      Object.assign(err, { code: m.code, extra: m.extra, workerStack: m.stack });
-      w.reject(err);
+      if (m.type === 'error') {
+        const err = new Error(m.message);
+        Object.assign(err, { code: m.code, extra: m.extra, workerStack: m.stack });
+        w.reject(err);
+      } else {
+        w.resolve(m); // result, imageReady, coupon
+      }
+    } finally {
+      this.#watch(true); // n'importe quel message prouve que le worker est vivant
     }
-    this.#watch(true);
   }
 
   #sendImage({ width, height, data }, id) {
@@ -80,25 +93,32 @@ export class Runner {
     this.worker.postMessage({ type: 'image', id, width, height, buffer }, [buffer]);
   }
 
-  /** Envoie l'image (RGBA) au worker. Le buffer est copié : l'appelant garde le sien. */
-  setImage(image) {
-    this.image = image;
+  /** Enregistre une demande et l'envoie ; échoue tout de suite si le worker est hors service. */
+  #request(msg, extra = {}) {
+    if (this.broken) return Promise.reject(this.broken);
     const id = ++this.seq;
     return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
-      this.#sendImage(image, id);
+      this.waiting.set(id, { resolve, reject, ...extra });
+      try {
+        msg(id);
+      } catch (e) {
+        this.waiting.delete(id);
+        reject(e);
+        return;
+      }
       this.#watch();
     });
   }
 
+  /** Envoie l'image (RGBA) au worker. Le buffer est copié : l'appelant garde le sien. */
+  setImage(image) {
+    this.image = image;
+    return this.#request((id) => this.#sendImage(image, id));
+  }
+
   /** Génère le banc d'essai de calibration (maillage unique). */
   coupon(params) {
-    const id = ++this.seq;
-    return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
-      this.worker.postMessage({ type: 'coupon', id, params });
-      this.#watch();
-    });
+    return this.#request((id) => this.worker.postMessage({ type: 'coupon', id, params }));
   }
 
   /** Lance un calcul. Les demandes plus anciennes encore en attente sont rejetées avec Superseded. */
@@ -106,11 +126,6 @@ export class Runner {
     for (const [oldId, w] of this.waiting) {
       if (w.isRun) { this.waiting.delete(oldId); w.reject(new Superseded()); }
     }
-    const id = ++this.seq;
-    return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject, isRun: true });
-      this.worker.postMessage({ type: 'run', id, params });
-      this.#watch();
-    });
+    return this.#request((id) => this.worker.postMessage({ type: 'run', id, params }), { isRun: true });
   }
 }
