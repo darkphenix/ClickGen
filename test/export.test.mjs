@@ -35,6 +35,22 @@ test('config Bambu : tous les vecteurs par filament ont la bonne longueur', asyn
   }
 });
 
+test('config Bambu : un gabarit à 4 filaments ne fausse pas le plateau ni les limites machine', async () => {
+  // piège : 4 = longueur de printable_area ; 2 = longueur des machine_max_* — jamais traités comme « par filament »
+  const tpl = structuredClone(await loadBambuTemplate());
+  const four = (v) => Array.from({ length: 4 }, () => v);
+  tpl.filament_colour = four('#111111');
+  tpl.nozzle_temperature = four('220');
+  tpl.printable_area = ['0x0', '180x0', '180x180', '0x180'];
+  tpl.bed_exclude_area = four('0x0');
+  tpl.machine_max_speed_x = ['500', '200'];
+  const cfg = bambuProjectSettings(tpl, ['#AA0000', '#00AA00'], { tower: { x: 1, y: 2 } });
+  assert.deepEqual(cfg.printable_area, tpl.printable_area);
+  assert.deepEqual(cfg.bed_exclude_area, tpl.bed_exclude_area);
+  assert.deepEqual(cfg.machine_max_speed_x, ['500', '200']);
+  assert.equal(cfg.nozzle_temperature.length, 2, 'les réglages par filament suivent bien');
+});
+
 test('disposition : pièces et tour de purge tiennent sur un plateau de 180 mm', () => {
   const sizes = [{ w: 60, h: 58 }, { w: 54, h: 55 }];
   const tower = towerSize(4);
@@ -45,6 +61,25 @@ test('disposition : pièces et tour de purge tiennent sur un plateau de 180 mm',
   for (const b of boxes) assert.ok(b[0] >= 0 && b[1] >= 0 && b[2] <= 180 && b[3] <= 180, JSON.stringify(b));
   const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
   assert.ok(!hit(boxes[0], boxes[1]) && !hit(boxes[0], boxes[2]) && !hit(boxes[1], boxes[2]));
+});
+
+test('tour de purge : l\'emprise couvre les mesures faites dans le G-code de Bambu Studio (2 à 7 filaments)', () => {
+  // [côté mesuré en x, côté mesuré en y] de la tour imprimée, brim compris, tranchée avec le gabarit A1 mini ;
+  // le brim déborde de 2,5 mm en x et 3,2 mm en y vers l'origine configurée.
+  // Avant : une largeur fixe de 39 mm sortait du plateau (erreur -104 du CLI) dès 5 filaments.
+  const measured = { 2: [31.8, 32.0], 3: [40.4, 40.3], 4: [47.0, 48.4], 5: [53.1, 55.0], 6: [58.0, 59.0], 7: [62.5, 64.2] };
+  const sizes = [{ w: 60, h: 58 }, { w: 54, h: 55 }];
+  for (const [n, [sx, sy]] of Object.entries(measured)) {
+    const t = towerSize(+n);
+    assert.ok(t.pad >= 3.2, `${n} filaments : décalage du brim couvert`);
+    assert.ok(t.w >= sx + t.pad - 2.5 && t.d >= sy + t.pad - 3.2, `${n} filaments : ${t.w.toFixed(1)} × ${t.d.toFixed(1)} pour ${sx} × ${sy}`);
+    // la tour réelle (origine configurée = coin + pad) reste dans l'emprise réservée, donc dans le plateau
+    const r = arrangeOnBed(180, sizes, t);
+    assert.ok(r.fits, `${n} filaments : les deux pièces et la tour tiennent sur 180 mm`);
+    const x0 = r.tower.x + t.pad - 2.5, y0 = r.tower.y + t.pad - 3.2;
+    assert.ok(x0 >= 0 && x0 + sx <= 180 && y0 >= 0 && y0 + sy <= 180, `${n} filaments : tour imprimée dans le plateau`);
+  }
+  assert.equal(towerSize(1), null);
 });
 
 test('3MF : objets, filaments, signature Bambu et maillages étanches', async () => {
@@ -72,6 +107,25 @@ test('3MF : objets, filaments, signature Bambu et maillages étanches', async ()
   const capMesh = lay.objects[1].parts[0].mesh;
   for (let i = 2; i < capMesh.positions.length; i += 3) zMin = Math.min(zMin, capMesh.positions[i]);
   assert.ok(Math.abs(zMin) < 1e-3, `z min du capuchon ${zMin}`);
+});
+
+test('3MF : sans relief aucun support ; avec relief, supports sur le capuchon seulement', async () => {
+  const printed = async (res) => {
+    const artColors = Object.fromEntries(res.meshes.arts.map((a) => [a.index, res.colors[a.index].hex]));
+    const { filaments, slots } = assignFilaments('#2b2f36', res.colors[0].hex, artColors);
+    const lay = layoutForPrint(res.meshes, { slots, names: { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` }, bed: 180, tower: towerSize(filaments.length) });
+    const bytes = build3mf({ title: 't', objects: lay.objects, filaments, application: 'BambuStudio-02.06.01.55' });
+    return { lay, settings: strFromU8(unzipSync(bytes)['Metadata/model_settings.config']) };
+  };
+  const flat = await printed(result);
+  assert.ok(!flat.lay.objects[1].settings && !/enable_support/.test(flat.settings), 'décor plat : pas de supports');
+
+  const pr = { ...DEFAULTS, relief: 0.8 };
+  const raised = await printed(await makeClicker(analyzeImage(bearImage(500, true), pr), pr));
+  assert.ok(raised.lay.objects[1].settings?.enable_support === '1');
+  // les clés sont dans l'objet « Capuchon », pas dans celui de la coque
+  const [shellCfg, capCfg] = raised.settings.split(/<object id=/).slice(1);
+  assert.ok(!/enable_support/.test(shellCfg) && /enable_support" value="1"/.test(capCfg));
 });
 
 test('STL binaire : taille et nombre de triangles', () => {

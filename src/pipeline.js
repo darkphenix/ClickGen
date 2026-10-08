@@ -258,8 +258,11 @@ export async function makeClicker(a, p, opts = {}) {
     // Un contour de décor exactement confondu avec celui du capuchon créerait des faces coïncidentes
     // et des triangles dégénérés dans le maillage.
     const capGrown = T(cap.offset(0.5, 'Round', 2, SEG));
+    // Îlots de couleur trop petits pour être imprimés : écartés avant toute opération géométrique. Sur une image
+    // bruitée ou très texturée ils se comptent par milliers et dominaient le temps de calcul (11 s pour du bruit).
+    const minLoop = Math.max(0.05, 0.25 * p.minArt * p.minArt);
     for (let i = 1; i < a.quant.colors.length; i++) {
-      const polys = toMm(a.artLoops[i] ?? [], tf, k);
+      const polys = toMm(a.artLoops[i] ?? [], tf, k).filter((l) => Math.abs(signedArea(l)) >= minLoop);
       if (!polys.length) continue;
       let cs = T(CrossSection.ofPolygons(polys, 'EvenOdd'));
       cs = T(cs.intersect(capGrown));
@@ -285,7 +288,7 @@ export async function makeClicker(a, p, opts = {}) {
     });
     const capKey = key({
       cap: capPolys, art: art.map((x) => [x.index, x.cs.toPolygons()]), pl: [placement.x, placement.y, placement.angle],
-      dims: [d.capH, d.pocketDepth, d.capRim], // seules les cotes que le capuchon utilise
+      dims: [d.capH, d.reliefDepth, d.pocketDepth, d.capRim], // seules les cotes que le capuchon utilise
       bossDiameter: p.bossDiameter, socketFit: p.socketFit, chamfer: p.chamfer, artDepth: p.artDepth, relief: p.relief,
     });
     const guard = (fn) => { try { return fn(); } catch (e) { throw new PipelineError('geometry', errorText(e)); } };
@@ -312,6 +315,7 @@ export async function makeClicker(a, p, opts = {}) {
     }
     const meshes = { shell: shellOut.shell, capBody: capOut.capBody, arts: capOut.arts, dims: d, warnings: capOut.warnings, keyring: shellOut.keyring };
     warnings.push(...capOut.warnings.map((w) => ({ code: 'note', text: w })));
+    if (p.relief > 0 && meshes.arts.length) warnings.push({ code: 'relief', height: p.relief }); // l'impression demande des supports
 
     const preview = {
       shell: S.toPolygons(),

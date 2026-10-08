@@ -228,18 +228,27 @@ async function useImage(img, o = {}) {
   requestRun(0);
 }
 
+let loadSeq = 0;
+
+/** @returns {Promise<boolean>} vrai si l'image a été appliquée (faux si une demande plus récente l'a remplacée) */
 async function loadFrom(source, name) {
+  const my = ++loadSeq;
   try {
     if (!runner) throw new Error(t('msg.workerFail'));
     const img = await loadImage(source, name);
+    if (my !== loadSeq) return false; // deux images en vol : la dernière demandée gagne, pas la dernière décodée
     store.imageSource = img;
     if (store.src === 'text') setSource('image', { reuse: false });
     await useImage(img);
+    return true;
   } catch (e) {
     console.error(e);
-    store.msgs = [{ kind: 'error', key: 'img.loadError', vars: { message: e.message } }];
-    renderMessages();
-    setBusy(false);
+    if (my === loadSeq) {
+      store.msgs = [{ kind: 'error', key: 'img.loadError', vars: { message: e.message } }];
+      renderMessages();
+      setBusy(false);
+    }
+    return false;
   }
 }
 
@@ -343,9 +352,13 @@ function scheduleText(delay = 320) {
   textTimer = setTimeout(applyText, delay);
 }
 
+let textSeq = 0;
+
 async function applyText(first = false) {
+  const my = ++textSeq;
   try {
     const img = await renderText({ text: store.text.value, font: store.text.font, color: '#ffffff' });
+    if (my !== textSeq) return; // un rendu plus récent est en cours : il s'occupera de l'affichage
     if (!img || store.src !== 'text') { setBusy(false); return; } // texte vide, ou l'utilisateur a changé d'onglet entre-temps
     if (params.frame === 'image') { params.frame = 'pill'; syncAll(); saveParams(); } // un texte seul n'a pas de contour utile
     await useImage(img, first ? { colors: { 0: TEXT_BG, 1: '#ffffff' } } : { resetColors: false });
@@ -423,6 +436,7 @@ function onResult(msg) {
     }
     if (w.code === 'toobig') return [{ kind: 'warn', key: 'msg.toobig', vars: { size: fmt(w.size), bed: params.bed } }];
     if (w.code === 'dropped') return [{ kind: 'info', key: 'msg.dropped', vars: { count: w.count } }];
+    if (w.code === 'relief') return [{ kind: 'warn', key: 'msg.relief', vars: { height: fmt(w.height) } }];
     if (w.code === 'manualReset') { params.placementX = params.placementY = null; return [{ kind: 'info', key: 'msg.manualReset' }]; }
     return [{ kind: 'info', raw: w.text }];
   });
@@ -688,9 +702,10 @@ async function openProject(file) {
     } else if (typeof proj.image?.dataUrl === 'string' && proj.image.dataUrl.startsWith('data:image/')) {
       setSource('image', { reuse: false });
       const keep = { ...store.overrides };
-      await loadFrom(proj.image.dataUrl, String(proj.image.name ?? 'image'));
-      store.overrides = keep;
-      requestRun(0);
+      if (await loadFrom(proj.image.dataUrl, String(proj.image.name ?? 'image'))) {
+        store.overrides = keep; // les couleurs du projet, pas celles que l'image vient de proposer
+        requestRun(0);
+      }
     }
   } catch (e) {
     console.error(e);

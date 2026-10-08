@@ -64,10 +64,12 @@ ${items.join('\n')}
       <metadata key="extruder" value="${part.slot + 1}"/>
       <mesh_stat face_count="${part.mesh.indices.length / 3}" edges_fixed="0" degenerate_facets="0" facets_removed="0" facets_reversed="0" backwards_edges="0"/>
     </part>`).join('\n');
+    // réglages propres à l'objet (mêmes clés que le slicer, ex. enable_support) : ils ne touchent que cette pièce
+    const own = Object.entries(obj.settings ?? {}).map(([k, v]) => `    <metadata key="${esc(k)}" value="${esc(v)}"/>\n`).join('');
     return `  <object id="${assemblyIds[i]}">
     <metadata key="name" value="${esc(obj.name)}"/>
     <metadata key="extruder" value="${obj.parts[0].slot + 1}"/>
-${parts}
+${own}${parts}
   </object>`;
   });
   const instances = o.objects.map((obj, i) => `    <model_instance>

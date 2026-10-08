@@ -92,12 +92,14 @@ export function buildCap(wasm, scope, cap, placement, art, p) {
   const rim = MECH.capPocketRim, ceil = MECH.capPocketCeil;
   const reliefProfile = T(CrossSection.square([rim, rim], true));
   // scaleTop doit être un couple [x, y] : un simple nombre ne réduirait que l'axe X (manifold 3.5)
-  const reliefRaw = T(reliefProfile.extrude(d.pocketDepth + 0.04, 0, 0, [ceil / rim, ceil / rim]));
+  const reliefRaw = T(reliefProfile.extrude(d.reliefDepth + 0.04, 0, 0, [ceil / rim, ceil / rim]));
   const relief = T(T(reliefRaw.rotate(0, 0, angle)).translate(px, py, -0.04));
   body = T(body.subtract(relief));
 
+  // le fourreau descend du plafond du relief jusqu'à 1 mm du bord ; la croix y est creusée sur
+  // `socketDepth`, son fond (= sommet de la tige au repos) est donc à pocketDepth, sous le plafond du relief
   const bossR = p.bossDiameter / 2;
-  const bossH = d.pocketDepth + 0.3 - MECH.mouthRecess;
+  const bossH = d.reliefDepth + 0.3 - MECH.mouthRecess;
   const boss = T(T(Manifold.cylinder(bossH, bossR, bossR, 64)).translate(px, py, MECH.mouthRecess));
   body = T(body.add(boss));
 

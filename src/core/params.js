@@ -74,7 +74,8 @@ export const PIN_HOLES = Object.freeze([
 export const MECH = Object.freeze({
   floorSkin: 1.2, // fond plein sous les cavités à pattes
   collarH: 4.0, // hauteur des parois du logement 14 mm
-  capH: 6.2, // hauteur de base du capuchon
+  capH: 6.2, // hauteur minimale du capuchon (plancher : la hauteur réelle dépend du relief et du décor)
+  travelMargin: 0.2, // jeu entre le plafond du relief et le dessus du boîtier, au fond de la course
   mouthRecess: 1.0, // le fourreau est en retrait du bord du capuchon
   socketDepth: 3.85, // profondeur de la croix
   capPocketRim: 14.8, // relief sous le capuchon : côté bord
@@ -100,7 +101,11 @@ export function derive(p) {
   const pocketDepth = m.mouthRecess + m.socketDepth; // profondeur du relief du capuchon
   const stemTop = seat + s.housingTop + s.stemAbove; // sommet de la tige au repos
   const capRim = stemTop - pocketDepth; // bord du capuchon au repos
-  const capH = Math.max(m.capH, pocketDepth + p.artDepth + 0.55);
+  // Le plafond du relief (hors fourreau) descend avec le capuchon : il ne doit pas toucher le dessus du
+  // boîtier avant la fin de la course. Au repos la tige dépasse de 3,6 mm du boîtier mais la course est de
+  // 4,0 mm ; sans cette marge le capuchon butait à 3,6 mm. Seul le fourreau (la croix) descend plus bas.
+  const reliefDepth = pocketDepth + Math.max(0, s.travel - s.stemAbove) + m.travelMargin;
+  const capH = Math.max(m.capH, reliefDepth + p.artDepth + 0.55);
   const shellH = capRim - s.travel + capH + m.topMargin;
   const pocket = s.lowerBody + p.pocketFit;
   return {
@@ -108,6 +113,7 @@ export function derive(p) {
     seat,
     cavityFloor,
     pocketDepth,
+    reliefDepth,
     stemTop,
     capRim,
     capH,

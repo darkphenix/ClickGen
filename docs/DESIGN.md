@@ -24,12 +24,16 @@ Un clicker = **une coque** (silhouette extrudée, avec le logement du switch) + 
 | 1,2 → 5,0 | cavité sous le switch (pattes, plot, ergots) : Ø12,4 « tolérante » ou 5 trous exacts |
 | 5,0 | plancher du switch (fond du boîtier) |
 | 5,0 → 9,0 | collerette : carré de 14,0 mm tenant le boîtier par friction |
-| 9,0 → 17,75 | cavité du capuchon, paroi de 2 mm |
+| 9,0 → 18,35 | cavité du capuchon, paroi de 2 mm |
 | 15,35 | bord du capuchon au repos (11,35 enfoncé) |
-| 20,2 | sommet de la tige au repos = plafond de la croix du capuchon |
-| 21,55 | face du capuchon au repos (17,55 enfoncé : il affleure sous le haut de la coque) |
+| 16,6 | dessus du boîtier du switch |
+| 20,2 | sommet de la tige au repos = fond de la croix du capuchon |
+| 20,8 | plafond du relief du capuchon au repos (16,8 enfoncé, soit 0,2 mm au-dessus du boîtier) |
+| 22,15 | face du capuchon au repos (18,15 enfoncé : il affleure sous le haut de la coque) |
 
-Capuchon (repère local, bord = 0) : hauteur 6,2 mm ; relief sous le capuchon de 14,8 → 11,8 mm sur 4,85 mm (loge le chapeau du switch, sans surplomb à l'impression) ; fourreau Ø5,9 en retrait de 1,0 mm, croix de 4,13 × 1,12 mm profonde de 3,85 mm avec entrée évasée ; décor dans les 0,8 mm du haut.
+Capuchon (repère local, bord = 0) : hauteur 6,8 mm ; relief sous le capuchon de 14,8 → 11,8 mm sur 5,45 mm (loge le chapeau du switch, sans surplomb à l'impression) ; fourreau Ø5,9 en retrait de 1,0 mm, croix de 4,13 × 1,12 mm profonde de 3,85 mm avec entrée évasée ; décor dans les 0,8 mm du haut.
+
+**Pourquoi le relief est plus profond que la croix (+0,6 mm).** La tige dépasse du boîtier de 3,6 mm mais la course est de 4,0 mm. Si le plafond du relief (hors fourreau) était au niveau du sommet de la tige, il viendrait toucher le dessus du boîtier après 3,6 mm de course : le capuchon butait avant le fond. Seul le fourreau, qui entre dans la cheminée du boîtier, doit descendre plus bas. Le plafond du relief est donc relevé de `travel − stemAbove + 0,2 mm` (`reliefDepth` dans `derive()`), et le test d'interférences balaie toute la course (0 à 4,0 mm). Le modèle de switch du test est simplifié (chapeau tronconique, fenêtre Ø6,2) : la cote reste à confirmer avec un vrai switch.
 
 ### Impression
 
@@ -69,6 +73,14 @@ Mesures sur un ours de 800 px (mono-fil, machine de développement) : détourage
 - `CrossSection.extrude(h, n, twist, scaleTop)` : un `scaleTop` numérique ne réduit que l'axe X dans manifold 3.5 ; il faut un couple `[x, y]`. Le test d'interférences (`test/mechanics.test.mjs`) l'a révélé.
 - Les maillages de manifold peuvent contenir des sommets de même position mais d'indices différents (pincement quand deux régions de décor se touchent en un point) : ils sont fermés **en indices** ; on vérifie donc l'étanchéité sans souder par position.
 - Un contour de décor exactement confondu avec celui du capuchon crée des faces coïncidentes : le décor déborde de 0,5 mm et la découpe 3D l'ajuste.
+- `CrossSection.bounds()` d'une section **vide** renvoie ±1,8e308 (pas une boîte vide) : une forme plus fine que « Détail minimum » donnait une taille infinie, une échelle de départ nulle et une recherche d'agrandissement sans fin. Le pipeline refuse maintenant ce cas (`vanished`) et borne la boucle ; `test/pipeline.test.mjs` l'exerce dans un `worker_thread` qu'il peut tuer.
+- Un pixel transparent **à l'intérieur** d'une silhouette comblée n'a pas de couleur : il ne doit pas voter dans le k-means (sinon son RGB brut 0,0,0 devient un « noir » imprimé) et prend la couleur de base.
+- Course réelle ≠ course annoncée tant que le plafond du relief colle au sommet de la tige (voir plus haut).
+
+## Garde-fous du calcul
+
+- Le worker envoie un signe de vie à chaque étape (`progress`). Si la page n'a aucune nouvelle pendant 45 s, `runner.js` tue le worker, en recrée un, lui renvoie l'image et fait échouer les demandes en cours avec le code `timeout`. Seules les réponses du worker prolongent ce délai : bouger un curseur ne relance pas le chronomètre d'un worker figé.
+- La vignette du 3MF est facultative : si `toBlob` échoue ou ne rappelle pas (contexte WebGL perdu), l'export continue sans elle.
 
 ## Export 3MF (Bambu Studio / OrcaSlicer)
 

@@ -76,7 +76,7 @@ export function componentAt(wasm, scope, cs, x, y) {
   const T = (v) => scope.add(v);
   const parts = cs.decompose().map(T);
   if (parts.length <= 1) return parts[0] ?? cs;
-  const probe = T(CrossSection.square([0.6, 0.6], true).translate(x, y));
+  const probe = T(T(CrossSection.square([0.6, 0.6], true)).translate(x, y));
   let best = parts[0], bestA = -1;
   for (const c of parts) {
     const hit = T(c.intersect(probe)).area();

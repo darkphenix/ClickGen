@@ -30,9 +30,22 @@ function mapMesh(mesh, fn) {
   return { positions: out, indices: mesh.indices };
 }
 
-/** Encombrement de la tour de purge Bambu (l = largeur réglée, profondeur ~ 16 + 7 mm par filament). */
-export function towerSize(nFilaments, width = 35) {
-  return nFilaments > 1 ? { w: width + 4, d: 16 + 7 * nFilaments + 6 } : null;
+/**
+ * Encombrement de la tour de purge Bambu, brim compris.
+ *
+ * Mesuré dans le G-code tranché par Bambu Studio (gabarit A1 mini : tour de 35 mm, brim de 3 mm) : la tour
+ * est à peu près carrée et son côté vaut 32, 40, 47, 53, 58 et 62 mm pour 2 à 7 filaments, soit un côté²
+ * qui croît d'environ 600 mm² par filament. Une extrapolation linéaire (largeur fixe) tenait à 4 filaments
+ * par chance et sortait du plateau (erreur -104) dès 5. On garde ≈ 3 mm de marge sur ces mesures.
+ *
+ * `pad` : écart entre le coin de l'emprise et la position écrite dans la config (le brim déborde de 2,5 à
+ * 3,2 mm vers l'origine de la tour).
+ * @returns {{w:number, d:number, pad:number}|null}
+ */
+export function towerSize(nFilaments) {
+  if (!(nFilaments > 1)) return null;
+  const side = Math.sqrt(600 * nFilaments - 190) + 3;
+  return { w: side, d: side, pad: 3.5 };
 }
 
 /**
@@ -117,6 +130,12 @@ export function layoutForPrint(meshes, cfg) {
     capParts.push({ name: cfg.names.art(a.index), mesh: flip(a.mesh), slot: cfg.slots.art[a.index] ?? cfg.slots.cap });
   }
   const capObj = { name: cfg.names.cap, parts: capParts, x: 0, y: 0 };
+  // Décor en relief : une fois le capuchon retourné, seuls les plots de décor touchent le plateau et la face
+  // du capuchon flotte au-dessus du vide. Il faut des supports (sur cette pièce seulement, et sur le plateau).
+  const faceGap = cb.z1 - boundsOf([meshes.capBody.mesh]).z1;
+  if (faceGap > 0.05) {
+    capObj.settings = { enable_support: '1', support_type: 'normal(auto)', support_on_build_plate_only: '1' };
+  }
 
   const arranged = arrangeOnBed(
     cfg.bed,
@@ -126,5 +145,8 @@ export function layoutForPrint(meshes, cfg) {
   [shellObj.x, shellObj.y] = [arranged.centers[0].x, arranged.centers[0].y];
   [capObj.x, capObj.y] = [arranged.centers[1].x, arranged.centers[1].y];
 
-  return { objects: [shellObj, capObj], fits: arranged.fits, tower: arranged.tower, bounds: { shell: sb, cap: cb } };
+  // position de la tour à écrire dans la config : coin de l'emprise + décalage dû au brim
+  const pad = cfg.tower?.pad ?? 0;
+  const tower = arranged.tower ? { x: arranged.tower.x + pad, y: arranged.tower.y + pad } : null;
+  return { objects: [shellObj, capObj], fits: arranged.fits, tower, bounds: { shell: sb, cap: cb } };
 }

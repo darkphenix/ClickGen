@@ -4,6 +4,10 @@
 // Pourquoi : sans ce fichier, Bambu Studio ignore les numéros de filament des volumes et
 // retombe sur 1 seul filament. Avec lui, chaque volume garde son filament et ses couleurs.
 
+// Familles de réglages qui ont des tableaux mais ne sont PAS par filament (machine, plateau, tour de purge…).
+// Un gabarit dont le nombre de filaments coïnciderait avec leur longueur (2, 4…) les aurait faussés.
+const NOT_PER_FILAMENT = /^(machine_|printable_area|bed_exclude_area|head_wrap|wipe_tower_|extruder_|nozzle_diameter|printer_|upward_|start_end|different_settings|flush_volumes)/;
+
 /**
  * @param {Record<string, any>} template contenu de templates/bambu-a1mini.json
  * @param {string[]} colors couleurs des filaments (#rrggbb), une par filament utilisé
@@ -17,7 +21,9 @@ export function bambuProjectSettings(template, colors, opts = {}) {
 
   // tous les vecteurs « un élément par filament » sont recopiés depuis le filament de référence
   for (const [key, value] of Object.entries(cfg)) {
-    if (Array.isArray(value) && value.length === n0) cfg[key] = Array.from({ length: n }, () => value[proto]);
+    if (Array.isArray(value) && value.length === n0 && !NOT_PER_FILAMENT.test(key)) {
+      cfg[key] = Array.from({ length: n }, () => value[proto]);
+    }
   }
   const hex = colors.map((c) => c.toUpperCase());
   cfg.filament_colour = hex;

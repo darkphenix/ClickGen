@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { segmentImage } from '../src/image/segment.js';
 import { simplifyLoop, signedArea, traceContours } from '../src/image/contours.js';
 import { quantizeColors } from '../src/image/quantize.js';
+import { svgSize } from '../src/imageio.js';
 import { bearImage, circle, fillPolygon, newImage } from './helpers.mjs';
 
 const area = (loops) => loops.reduce((a, l) => a + signedArea(l), 0);
@@ -67,6 +68,19 @@ test('couleurs : un trou transparent bouché ne devient ni noir ni blanc, il pre
     assert.equal(q.colors.length, 1, `k=${k} : une seule couleur d'image (${q.colors.map((c) => c.hex)})`);
     assert.equal(q.colors[0].hex, '#e6781e');
     assert.equal(q.labels[150 * W + 150], q.outside, 'le centre du trou n\'a pas de couleur propre');
+  }
+});
+
+test('SVG : dimensions lues sur la balise racine, jamais NaN ni nulles', () => {
+  assert.deepEqual(svgSize('<svg xmlns="x" viewBox="0 0 24 32"><path/></svg>'), [24, 32]);
+  assert.deepEqual(svgSize('<svg viewBox="10, 20, 100, 50">'), [100, 50], 'virgules et espaces');
+  // un viewBox ailleurs que sur la racine (commentaire, <symbol>) ne compte pas
+  assert.deepEqual(svgSize('<!-- viewBox="0 0 1 1" --><svg width="64" height="48"><symbol viewBox="0 0 9 9"/></svg>'), [64, 48]);
+  // pas de viewBox : width/height (et pas stroke-width)
+  assert.deepEqual(svgSize('<svg stroke-width="9" width="30px" height="20px">'), [30, 20]);
+  // valeurs inutilisables -> repli sur 512 x 512
+  for (const bad of ['<svg viewBox="0 0 0 0">', '<svg viewBox="a b c d">', '<svg viewBox="0 0 -5 10">', '<svg>', 'pas du svg']) {
+    assert.deepEqual(svgSize(bad), [512, 512], bad);
   }
 });
 

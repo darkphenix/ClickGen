@@ -1,6 +1,6 @@
 // Simulation d'interférences : on pose un switch MX simplifié (cotes du datasheet Cherry) dans la coque,
-// on enfonce le capuchon de 0 à ~3,5 mm et on vérifie qu'aucune pièce ne se traverse, hormis la croix
-// de la tige qui s'emboîte volontairement (jeu négatif de quelques centièmes de mm).
+// on enfonce le capuchon sur toute sa course (0 à 4 mm) et on vérifie qu'aucune pièce ne se traverse,
+// hormis la croix de la tige qui s'emboîte volontairement (jeu négatif de quelques centièmes de mm).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,7 +42,7 @@ function buildSwitch(sc) {
 
 const vol = (sc, a, b) => sc.add(a.intersect(b)).volume();
 
-test('interférences : rien ne se traverse de 0 à 3,4 mm de course', () => {
+test('interférences : rien ne se traverse sur toute la course, de 0 à 4 mm', () => {
   const sc = new Scope();
   try {
     const shell = manifoldOf(sc, result.meshes.shell.mesh);
@@ -51,7 +51,8 @@ test('interférences : rien ne se traverse de 0 à 3,4 mm de course', () => {
     const { fixed, stem } = buildSwitch(sc);
 
     assert.ok(vol(sc, shell, fixed) < 0.5, `coque x switch : ${vol(sc, shell, fixed)} mm³`);
-    for (const t of [0, 1, 2, 3, 3.4]) {
+    // 3,6 à 3,8 mm : régression, le plafond du relief butait sur le dessus du boîtier juste après 3,6 mm
+    for (const t of [0, 1, 2, 3, 3.4, 3.6, 3.7, 3.8, SWITCH.travel]) {
       const capT = sc.add(cap.translate(0, 0, -t));
       const stemT = sc.add(stem.translate(0, 0, -t));
       assert.ok(vol(sc, capT, shell) < 0.5, `capuchon x coque à ${t} mm : ${vol(sc, capT, shell)} mm³`);
@@ -70,6 +71,11 @@ test('la tige touche le plafond de la croix au repos (le capuchon est bien posé
   assert.ok(Math.abs(stemTop - (d.capRim + d.pocketDepth)) < 1e-9);
   assert.ok(d.capTopRest - SWITCH.travel < d.shellH, 'enfoncé, le capuchon affleure sous le haut de la coque');
   assert.ok(d.capRim - SWITCH.travel > d.cavityFloor, 'le bord du capuchon ne touche pas le plancher de la cavité');
+  // au fond de la course, le plafond du relief (hors fourreau) reste au-dessus du boîtier du switch
+  const housingTop = d.seat + SWITCH.housingTop;
+  const reliefCeilingBottomedOut = d.capRim + d.reliefDepth - SWITCH.travel;
+  assert.ok(reliefCeilingBottomedOut >= housingTop + 0.15, `plafond du relief ${reliefCeilingBottomedOut} mm pour un boîtier à ${housingTop} mm`);
+  assert.ok(d.reliefDepth > d.pocketDepth, 'le plafond du relief est plus haut que le sommet de la croix');
 });
 
 test('le relief du capuchon (14,8 mm) garde au moins 1,1 mm de paroi, sur des formes variées', async () => {
