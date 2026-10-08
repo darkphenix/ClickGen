@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PipelineError, analyzeImage, makeClicker } from '../src/pipeline.js';
 import { DEFAULTS, derive } from '../src/core/params.js';
 import { bearImage, checkMesh, circle, fillPolygon, heart, newImage, solidIntervals, star } from './helpers.mjs';
+import { runGuarded } from './guarded.mjs';
 
 const dark = [40, 40, 60, 255], red = [200, 40, 40, 255], gold = [240, 190, 40, 255];
 
@@ -91,6 +92,26 @@ test('formes variées : étoile, cœur, anneau', async () => {
 
 test('image sans forme : erreur « empty »', () => {
   assert.throws(() => analyzeImage(newImage(100, 100), DEFAULTS), (e) => e.code === 'empty');
+});
+
+test('formes plus fines que « Détail minimum » : refus rapide, jamais de boucle infinie', async () => {
+  // régression : la silhouette vide avait des bornes infinies, l'échelle de départ tombait à 0 et la
+  // recherche d'agrandissement ne finissait plus (le worker restait figé)
+  for (const name of ['line', 'cross', 'dust']) {
+    const r = await runGuarded(name, 20000);
+    assert.ok(!r.hung, `${name} : le calcul ne s'arrête pas`);
+    assert.ok(!r.ok && ['vanished', 'nofit', 'empty'].includes(r.code), `${name} : ${JSON.stringify(r)}`);
+    assert.ok(r.ms < 10000, `${name} : ${r.ms} ms`);
+  }
+});
+
+test('paramètres invalides : taille ou plateau absurdes sont refusés, angle imposé NaN ignoré', async () => {
+  const a = analyzeImage(bearImage(500, true), DEFAULTS);
+  for (const bad of [{ size: 0 }, { size: NaN }, { size: -5 }, { bed: NaN }, { bed: 0 }]) {
+    await assert.rejects(makeClicker(a, { ...DEFAULTS, ...bad }), (e) => e instanceof PipelineError && e.code === 'geometry', JSON.stringify(bad));
+  }
+  const r = await makeClicker(a, { ...DEFAULTS, placementAngle: NaN });
+  assert.ok(Number.isFinite(r.placement.angle), 'retour au placement automatique');
 });
 
 test('décor en relief : la couche dépasse du capuchon de la hauteur demandée', async () => {

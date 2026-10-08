@@ -394,8 +394,13 @@ async function runNow() {
 
 function onError(e) {
   console.error(e.workerStack || e);
-  const key = { empty: 'msg.empty', nofit: 'msg.nofit', geometry: 'msg.geometry' }[e.code] ?? 'msg.internal';
-  store.msgs = [{ kind: 'error', key, vars: { size: e.extra?.size ? fmt(e.extra.size) : '', message: e.message } }];
+  const key = { empty: 'msg.empty', vanished: 'msg.vanished', nofit: 'msg.nofit', geometry: 'msg.geometry', timeout: 'msg.timeout' }[e.code] ?? 'msg.internal';
+  const x = e.extra ?? {};
+  store.msgs = [{ kind: 'error', key, vars: {
+    size: x.size ? fmt(x.size) : '',
+    minDetail: Number.isFinite(x.minDetail) ? fmt(x.minDetail) : '',
+    message: e.message,
+  } }];
   renderMessages();
   setExportEnabled(false);
 }

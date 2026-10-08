@@ -5,8 +5,9 @@
 //   -> {type:'coupon', id, params}                 banc d'essai de calibration
 //   <- {type:'result', id, analysis, result}       ou {type:'error', id, code, message, extra}
 //   <- {type:'coupon', id, mesh, info}
+//   <- {type:'progress', id, step}                 signe de vie pendant un calcul long
 
-import { PipelineError, analyzeImage, isFramed, makeClicker } from './pipeline.js';
+import { PipelineError, analyzeImage, errorText, isFramed, makeClicker } from './pipeline.js';
 import { Scope, getEngine } from './geometry/engine.js';
 import { buildCoupon, couponToMesh } from './geometry/coupon.js';
 
@@ -42,7 +43,7 @@ async function runCoupon(m) {
     const mesh = couponToMesh(res);
     self.postMessage({ type: 'coupon', id: m.id, mesh, info: res.info }, [mesh.positions.buffer, mesh.indices.buffer]);
   } catch (err) {
-    self.postMessage({ type: 'error', id: m.id, code: 'internal', message: err.message, extra: {}, stack: String(err.stack ?? '') });
+    self.postMessage({ type: 'error', id: m.id, code: 'internal', message: errorText(err), extra: {}, stack: String(err?.stack ?? '') });
   } finally {
     sc.dispose();
   }
@@ -57,9 +58,11 @@ async function drain() {
     if (!img) throw new PipelineError('empty', 'Aucune image chargée.');
     const p = job.params;
     const key = `${imgVersion}|${MASK_KEYS.map((k) => String(p[k])).join('|')}|${isFramed(p) ? 'frame' : 'outline'}`;
-    if (cache.key !== key) cache = { key, value: analyzeImage(img, p) };
+    // signes de vie : la page tue et relance le worker s'il reste muet trop longtemps (voir runner.js)
+    const alive = (step) => self.postMessage({ type: 'progress', id: job.id, step });
+    if (cache.key !== key) { alive('analyze'); cache = { key, value: analyzeImage(img, p) }; }
     const a = cache.value;
-    const result = await makeClicker(a, p, { cache: buildCache });
+    const result = await makeClicker(a, p, { cache: buildCache, onStep: alive });
     // les maillages en cache restent ici : on envoie des copies (transférer les tampons les viderait)
     const transfer = [];
     const send = (item) => {
@@ -91,9 +94,9 @@ async function drain() {
       type: 'error',
       id: job.id,
       code: err instanceof PipelineError ? err.code : 'internal',
-      message: err.message,
-      extra: err instanceof PipelineError ? { size: err.size } : {},
-      stack: String(err.stack ?? ''),
+      message: errorText(err),
+      extra: err instanceof PipelineError ? err.extra : {},
+      stack: String(err?.stack ?? ''),
     });
   } finally {
     running = false;

@@ -459,17 +459,32 @@ export class Viewer {
       [[[bb.x1, bb.y1, d.capTopRest], [tx, ty, d.capTopRest]]], 20);
   }
 
-  /** Miniature PNG (octets) de la vue courante, pour le 3MF. */
+  /**
+   * Miniature PNG (octets) de la vue courante, pour le 3MF. Facultative : en cas d'échec (contexte WebGL
+   * perdu, toBlob qui renvoie null ou ne rappelle jamais) on résout `undefined` et l'export continue sans.
+   * @returns {Promise<Uint8Array|undefined>}
+   */
   thumbnail(size = 256) {
-    this._apply();
-    this.renderer.render(this.scene, this.camera);
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#164a86';
-    ctx.fillRect(0, 0, size, size);
-    const w = this.canvas.width, h = this.canvas.height, s = Math.min(w, h);
-    ctx.drawImage(this.canvas, (w - s) / 2, (h - s) / 2, s, s, 0, 0, size, size);
-    return new Promise((resolve) => c.toBlob(async (b) => resolve(new Uint8Array(await b.arrayBuffer())), 'image/png'));
+    try {
+      this._apply();
+      this.renderer.render(this.scene, this.camera);
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#164a86';
+      ctx.fillRect(0, 0, size, size);
+      const w = this.canvas.width, h = this.canvas.height, s = Math.min(w, h);
+      ctx.drawImage(this.canvas, (w - s) / 2, (h - s) / 2, s, s, 0, 0, size, size);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(undefined), 3000);
+        c.toBlob(async (b) => {
+          clearTimeout(timer);
+          try { resolve(b ? new Uint8Array(await b.arrayBuffer()) : undefined); } catch { resolve(undefined); }
+        }, 'image/png');
+      });
+    } catch (e) {
+      console.warn('vignette 3MF indisponible', e);
+      return Promise.resolve(undefined);
+    }
   }
 }

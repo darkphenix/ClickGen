@@ -24,11 +24,17 @@ export function quantizeColors(img, inside, k, opts = {}) {
   k = Math.max(1, Math.min(8, Math.round(k)));
 
   // 1) clé de couleur de chaque pixel intérieur + histogramme
+  // Un pixel transparent à l'intérieur de la silhouette (trou comblé) n'a pas de couleur : il ne vote pas
+  // et prend la couleur de base. Sinon son RGB brut (0, 0, 0) donnait un « noir » fantôme à la médiane,
+  // ou le blanc de la composition occupait l'une des couleurs demandées.
+  let opaque = 0;
+  for (let i = 0; i < n; i++) if (inside[i] && data[i * 4 + 3] >= 128) opaque++;
+  const votes = (i) => inside[i] && (opaque === 0 || data[i * 4 + 3] >= 128); // opaque === 0 : image entièrement translucide
   const keyOf = new Uint16Array(n);
   const hist = new Uint32Array(32768);
   let count = 0;
   for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
+    if (!votes(i)) continue;
     let r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
     const a = data[i * 4 + 3];
     if (a < 128) { const t = a / 255; r = r * t + 255 * (1 - t); g = g * t + 255 * (1 - t); b = b * t + 255 * (1 - t); }
@@ -92,7 +98,7 @@ export function quantizeColors(img, inside, k, opts = {}) {
   const labelOfKey = new Uint8Array(32768);
   for (let j = 0; j < m; j++) labelOfKey[keys[j]] = nearest(centers, lab, j);
   const lab8 = new Uint8Array(n).fill(OUTSIDE);
-  for (let i = 0; i < n; i++) if (inside[i]) lab8[i] = labelOfKey[keyOf[i]];
+  for (let i = 0; i < n; i++) if (votes(i)) lab8[i] = labelOfKey[keyOf[i]];
 
   // 6) filtre majoritaire 3 x 3 : supprime liserés d'anticrénelage et poussières
   majorityFilter(lab8, w, h, centers.length, 2);

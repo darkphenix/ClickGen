@@ -13,13 +13,21 @@ import { findPlacement } from './geometry/placement.js';
 import { buildCap, buildShell } from './geometry/clicker.js';
 
 export class PipelineError extends Error {
-  /** @param {'empty'|'nofit'|'toobig'|'geometry'} code */
+  /**
+   * @param {'empty'|'vanished'|'nofit'|'toobig'|'geometry'} code
+   *   vanished : la forme existe mais disparaît après le nettoyage (plus fine que « Détail minimum »)
+   * @param {object} [extra] valeurs utiles à l'affichage du message (taille, détail minimum…)
+   */
   constructor(code, message, extra = {}) {
     super(message);
     this.code = code;
+    this.extra = extra;
     Object.assign(this, extra);
   }
 }
+
+/** Texte d'une erreur quelconque : le WASM de manifold lève parfois un simple nombre (pointeur C++). */
+export const errorText = (e) => (e && typeof e === 'object' && e.message) || String(e);
 
 /** Vrai si l'utilisateur a choisi un cadre géométrique plutôt que le contour de l'image. */
 export const isFramed = (p) => !!p.frame && p.frame !== 'image';
@@ -102,6 +110,9 @@ function traceLabel(labels, idx, w, h) {
  *   ne sont pas reconstruits (les maillages en cache sont partagés : à ne pas modifier).
  */
 export async function makeClicker(a, p, opts = {}) {
+  // ces deux valeurs bornent la recherche d'agrandissement : jamais NaN, jamais ≤ 0
+  if (!Number.isFinite(p.size) || p.size <= 0) throw new PipelineError('geometry', 'La taille doit être un nombre positif.');
+  if (!Number.isFinite(p.bed) || p.bed <= 0) throw new PipelineError('geometry', 'La taille du plateau doit être un nombre positif.');
   const wasm = await getEngine();
   const { CrossSection } = wasm;
   const d = derive(p);
@@ -143,7 +154,7 @@ export async function makeClicker(a, p, opts = {}) {
   };
 
   /** Essaie une échelle : silhouette, capuchon, position du switch. */
-  const angles = p.placementAngle == null ? undefined : [((p.placementAngle % 90) + 90) % 90];
+  const angles = Number.isFinite(p.placementAngle) ? [((p.placementAngle % 90) + 90) % 90] : undefined;
   const tryFit = (k) => {
     const sc = new Scope();
     try {
@@ -176,8 +187,14 @@ export async function makeClicker(a, p, opts = {}) {
     if (!framed) {
       const probe = new Scope();
       try {
-        const b = outlineAt(probe, 1).cs.bounds();
-        const eff = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]);
+        const cs = outlineAt(probe, 1).cs;
+        // Une silhouette vide (forme plus fine que « Détail minimum ») a des bornes infinies : sans ce refus,
+        // l'échelle de départ tombe à 0 et la recherche d'agrandissement ne s'arrête plus.
+        const b = cs.isEmpty() ? null : cs.bounds();
+        const eff = b ? Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) : 0;
+        if (!(eff > 0) || !Number.isFinite(eff)) {
+          throw new PipelineError('vanished', 'La forme disparaît avec le nettoyage actuel.', { minDetail: p.minDetail });
+        }
         if (eff > 1 && Math.abs(eff - p.size) / p.size > 0.005) k0 = p.size / eff;
       } finally {
         probe.dispose();
@@ -188,25 +205,35 @@ export async function makeClicker(a, p, opts = {}) {
     // --- agrandissement automatique : on cherche l'échelle minimale où le switch rentre --------
     // (progression géométrique jusqu'à trouver, puis dichotomie : ~8 essais au lieu de 24)
     let best = tryFit(k0);
-    if (!best.placement) {
-      if (!p.autoGrow) {
+    try {
+      if (!best.placement) {
+        if (!p.autoGrow) {
+          throw new PipelineError('nofit', 'Le switch ne rentre pas dans cette forme à cette taille.', { size: sizeOf(k0) });
+        }
+        let lo = k0, hi = k0;
         best.sc.dispose();
-        throw new PipelineError('nofit', 'Le switch ne rentre pas dans cette forme à cette taille.', { size: sizeOf(k0) });
+        best = null;
+        // la limite de taille arrête déjà la boucle en ≈ 12 pas ; le compteur n'est qu'une seconde ceinture
+        for (let n = 0; !best; n++) {
+          hi *= 1.25;
+          const size = sizeOf(hi);
+          if (!(size <= sizeLimit) || n >= 40) {
+            throw new PipelineError('nofit', 'La forme est trop fine pour loger un switch.', { size: Number.isFinite(size) ? size : sizeLimit });
+          }
+          await step('fit');
+          const t = tryFit(hi);
+          if (t.placement) best = t; else { t.sc.dispose(); lo = hi; }
+        }
+        for (let i = 0; i < 5 && (hi - lo) / lo > 0.02; i++) {
+          const mid = (lo + hi) / 2;
+          await step('fit');
+          const t = tryFit(mid);
+          if (t.placement) { best.sc.dispose(); best = t; hi = mid; } else { t.sc.dispose(); lo = mid; }
+        }
       }
-      let lo = k0, hi = k0;
-      best.sc.dispose();
-      best = null;
-      while (!best) {
-        hi *= 1.25;
-        if (sizeOf(hi) > sizeLimit) throw new PipelineError('nofit', 'La forme est trop fine pour loger un switch.', { size: sizeOf(hi) });
-        const t = tryFit(hi);
-        if (t.placement) best = t; else { t.sc.dispose(); lo = hi; }
-      }
-      for (let i = 0; i < 5 && (hi - lo) / lo > 0.02; i++) {
-        const mid = (lo + hi) / 2;
-        const t = tryFit(mid);
-        if (t.placement) { best.sc.dispose(); best = t; hi = mid; } else { t.sc.dispose(); lo = mid; }
-      }
+    } catch (e) {
+      best?.sc.dispose(); // un essai qui lève ne doit pas laisser fuir la mémoire WASM du meilleur ajustement
+      throw e;
     }
     scope = best.sc;
     const { S, dropped, placement } = best;
@@ -261,7 +288,7 @@ export async function makeClicker(a, p, opts = {}) {
       dims: [d.capH, d.pocketDepth, d.capRim], // seules les cotes que le capuchon utilise
       bossDiameter: p.bossDiameter, socketFit: p.socketFit, chamfer: p.chamfer, artDepth: p.artDepth, relief: p.relief,
     });
-    const guard = (fn) => { try { return fn(); } catch (e) { throw new PipelineError('geometry', e.message); } };
+    const guard = (fn) => { try { return fn(); } catch (e) { throw new PipelineError('geometry', errorText(e)); } };
 
     let shellOut = cache?.shell?.key === shellKey ? cache.shell.value : null;
     if (!shellOut) {

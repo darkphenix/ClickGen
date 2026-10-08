@@ -50,6 +50,26 @@ test('segmentation : image unie sans forme -> aucune boîte', () => {
   assert.equal(segmentImage(newImage(80, 80)).bounds, null);
 });
 
+test('couleurs : un trou transparent bouché ne devient ni noir ni blanc, il prend la couleur de base', () => {
+  // anneau orange (bords nets) dont le trou est transparent, RGBA brut 0,0,0,0
+  const W = 300;
+  const img = newImage(W, W, [0, 0, 0, 0]);
+  for (let y = 0; y < W; y++) {
+    for (let x = 0; x < W; x++) {
+      const r = Math.hypot(x - 150, y - 150);
+      if (r < 130 && r >= 50) img.data.set([230, 120, 30, 255], (y * W + x) * 4);
+    }
+  }
+  const seg = segmentImage(img, { fillHoles: true });
+  assert.equal(traceContours(seg.field, W, W).length, 1, 'le trou est bouché');
+  for (const k of [1, 2, 3]) {
+    const q = quantizeColors(img, seg.solid, k);
+    assert.equal(q.colors.length, 1, `k=${k} : une seule couleur d'image (${q.colors.map((c) => c.hex)})`);
+    assert.equal(q.colors[0].hex, '#e6781e');
+    assert.equal(q.labels[150 * W + 150], q.outside, 'le centre du trou n\'a pas de couleur propre');
+  }
+});
+
 test('couleurs : l\'ours a 3 couleurs et la médiane garde les teintes d\'origine', () => {
   const img = bearImage(400, true);
   const seg = segmentImage(img);

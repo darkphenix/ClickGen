@@ -141,6 +141,8 @@ const FR = {
 
   'msg.computing': 'Calcul en cours…',
   'msg.empty': 'Aucune forme détectée. Essayez une autre image ou réglez la tolérance du fond.',
+  'msg.vanished': 'La forme est trop fine : elle disparaît quand les détails de moins de {minDetail} mm sont retirés. Réduisez « Détail minimum » ou placez l’image dans un cadre.',
+  'msg.timeout': 'Le calcul a pris trop de temps et a été arrêté. Simplifiez l’image, augmentez « Détail minimum » ou choisissez un cadre.',
   'msg.nofit': 'Le switch ne rentre pas à {size} mm. Agrandissez la forme ou activez l’agrandissement automatique.',
   'msg.geometry': 'La géométrie n’a pas pu être construite : {message}',
   'msg.internal': 'Erreur inattendue : {message}',
@@ -309,6 +311,8 @@ const EN = {
 
   'msg.computing': 'Working…',
   'msg.empty': 'No shape detected. Try another image or tune the background tolerance.',
+  'msg.vanished': 'The shape is too thin: it disappears once details under {minDetail} mm are removed. Lower “Minimum detail” or put the image in a frame.',
+  'msg.timeout': 'The computation took too long and was stopped. Simplify the image, raise “Minimum detail” or pick a frame.',
   'msg.nofit': 'The switch does not fit at {size} mm. Make the shape bigger or enable automatic growth.',
   'msg.geometry': 'The geometry could not be built: {message}',
   'msg.internal': 'Unexpected error: {message}',
