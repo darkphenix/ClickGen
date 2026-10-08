@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="6" y="14" width="52" height="44" rx="10" fill="#1a3fb0"/>
+  <rect x="6" y="8" width="52" height="44" rx="10" fill="#2a5de8"/>
+  <rect x="9" y="10" width="46" height="38" rx="8" fill="#4a79f5"/>
+  <text x="32" y="40" text-anchor="middle" font-family="IBM Plex Sans Condensed, Arial Narrow, sans-serif" font-weight="700" font-size="28" fill="#fff">C</text>
+</svg>

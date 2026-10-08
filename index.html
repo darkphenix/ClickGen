@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ClickGen : clickers 3D imprimables à partir d’une image</title>
+  <meta name="description" content="Transformez n’importe quelle image en clicker 3D à switch mécanique (Cherry MX) : aperçu en direct, export 3MF multicolore pour Bambu Studio, STL. 100 % dans le navigateur.">
+  <meta name="theme-color" content="#164a86">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+</head>
+<body>
+  <header class="top">
+    <h1 class="logo" aria-label="ClickGen" id="logo">
+      <button class="key accent" type="button" tabindex="-1" aria-hidden="true">C</button><button class="key" type="button" tabindex="-1" aria-hidden="true">L</button><button class="key" type="button" tabindex="-1" aria-hidden="true">I</button><button class="key" type="button" tabindex="-1" aria-hidden="true">C</button><button class="key" type="button" tabindex="-1" aria-hidden="true">K</button><span class="gap"></span><button class="key" type="button" tabindex="-1" aria-hidden="true">G</button><button class="key" type="button" tabindex="-1" aria-hidden="true">E</button><button class="key accent" type="button" tabindex="-1" aria-hidden="true">N</button>
+    </h1>
+    <p class="tagline" data-i18n="app.tagline">Votre image devient un clicker à switch mécanique, prêt à imprimer.</p>
+    <nav class="nav">
+      <button class="chip" type="button" id="lang" data-i18n-attr="aria-label:lang.label"><span data-i18n="lang.other">EN</span></button>
+      <a class="chip" href="https://github.com/darkphenix/ClickGen" target="_blank" rel="noopener" data-i18n="nav.source">Code source</a>
+    </nav>
+  </header>
+
+  <main class="app">
+    <aside class="panel" id="panel">
+      <div class="panel-scroll">
+
+        <details class="sec" open>
+          <summary data-i18n="img.title">Image</summary>
+          <div class="sec-body">
+            <label class="drop" id="drop" tabindex="0">
+              <input type="file" id="file" accept="image/*,.svg" hidden>
+              <canvas id="thumb" width="320" height="200" aria-hidden="true"></canvas>
+              <span class="drop-text">
+                <strong data-i18n="img.drop">Déposez une image ici</strong>
+                <span data-i18n="img.dropSub">ou cliquez pour parcourir.</span>
+              </span>
+            </label>
+            <div class="samples" role="group" aria-label="Exemples">
+              <span class="mini" data-i18n="img.samples">Essayer avec</span>
+              <button type="button" class="chip" data-sample="cat" data-i18n="img.sample.cat">Chat</button>
+              <button type="button" class="chip" data-sample="mushroom" data-i18n="img.sample.mushroom">Champignon</button>
+              <button type="button" class="chip" data-sample="star" data-i18n="img.sample.star">Étoile</button>
+              <button type="button" class="chip" data-sample="ghost" data-i18n="img.sample.ghost">Fantôme</button>
+              <button type="button" class="chip" data-sample="heart" data-i18n="img.sample.heart">Cœur</button>
+            </div>
+            <div class="field">
+              <label for="maskMode"><span data-i18n="img.mode">Détourage</span></label>
+              <select id="maskMode" data-param="maskMode">
+                <option value="auto" data-i18n="img.mode.auto">Automatique</option>
+                <option value="alpha" data-i18n="img.mode.alpha">Transparence</option>
+                <option value="color" data-i18n="img.mode.color">Couleur du fond</option>
+              </select>
+            </div>
+            <div class="field" id="toleranceField">
+              <label for="tolerance"><span data-i18n="img.tolerance">Tolérance du fond</span><output data-for="tolerance"></output></label>
+              <input type="range" id="tolerance" data-param="tolerance" min="3" max="60" step="1">
+            </div>
+            <div class="toggles">
+              <label class="toggle"><input type="checkbox" data-param="fillHoles"><i></i><span data-i18n="img.fillHoles">Boucher les trous</span></label>
+              <label class="toggle"><input type="checkbox" data-param="invert"><i></i><span data-i18n="img.invert">Inverser la forme</span></label>
+            </div>
+            <p class="note" data-i18n="img.hint"></p>
+          </div>
+        </details>
+
+        <details class="sec" open>
+          <summary data-i18n="shape.title">Forme</summary>
+          <div class="sec-body">
+            <div class="field">
+              <label for="size"><span data-i18n="shape.size">Taille de la coque</span><output data-for="size" data-unit="mm"></output></label>
+              <input type="range" id="size" data-param="size" min="30" max="150" step="1">
+            </div>
+            <div class="toggles">
+              <label class="toggle"><input type="checkbox" data-param="autoGrow"><i></i><span data-i18n="shape.autoGrow">Agrandir si le switch ne rentre pas</span></label>
+              <label class="toggle"><input type="checkbox" data-param="keepMain"><i></i><span data-i18n="shape.keepMain">Garder la plus grande pièce seulement</span></label>
+            </div>
+            <div class="field">
+              <label for="smooth"><span data-i18n="shape.smooth">Lissage du contour</span><output data-for="smooth" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="smooth" data-param="smooth" min="0" max="3" step="0.1">
+            </div>
+            <div class="field">
+              <label for="minDetail"><span data-i18n="shape.minDetail">Détail minimum</span><output data-for="minDetail" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="minDetail" data-param="minDetail" min="0" max="4" step="0.1">
+            </div>
+            <div class="field">
+              <label for="closeGap"><span data-i18n="shape.closeGap">Combler les fentes</span><output data-for="closeGap" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="closeGap" data-param="closeGap" min="0" max="4" step="0.1">
+            </div>
+          </div>
+        </details>
+
+        <details class="sec" open>
+          <summary data-i18n="col.title">Couleurs</summary>
+          <div class="sec-body">
+            <div class="field">
+              <label><span data-i18n="col.count">Couleurs de l’image</span><output data-for="colorCount"></output></label>
+              <div class="seg" role="radiogroup" id="colorCount" aria-label="Couleurs de l’image">
+                <button type="button" role="radio" data-val="1">1</button>
+                <button type="button" role="radio" data-val="2">2</button>
+                <button type="button" role="radio" data-val="3">3</button>
+                <button type="button" role="radio" data-val="4">4</button>
+                <button type="button" role="radio" data-val="5">5</button>
+              </div>
+            </div>
+            <div class="swatches" id="swatches"></div>
+            <div class="field">
+              <label for="artDepth"><span data-i18n="col.depth">Épaisseur du décor</span><output data-for="artDepth" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="artDepth" data-param="artDepth" min="0.4" max="1.2" step="0.1">
+            </div>
+            <div class="field">
+              <label for="relief"><span data-i18n="col.relief">Relief du décor</span><output data-for="relief" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="relief" data-param="relief" min="0" max="1.5" step="0.1">
+            </div>
+            <p class="note" data-i18n="col.hint"></p>
+          </div>
+        </details>
+
+        <details class="sec">
+          <summary data-i18n="fit.title">Ajustements</summary>
+          <div class="sec-body">
+            <div class="field">
+              <label for="pocketFit"><span data-i18n="fit.pocket">Logement du switch</span><output data-for="pocketFit" data-unit="mm" data-digits="2" data-signed></output></label>
+              <input type="range" id="pocketFit" data-param="pocketFit" min="-0.3" max="0.4" step="0.05">
+            </div>
+            <div class="field">
+              <label for="socketFit"><span data-i18n="fit.socket">Serrage de la croix</span><output data-for="socketFit" data-unit="mm" data-digits="2" data-signed></output></label>
+              <input type="range" id="socketFit" data-param="socketFit" min="-0.15" max="0.25" step="0.025">
+            </div>
+            <div class="field">
+              <label for="clearance"><span data-i18n="fit.clearance">Jeu capuchon / coque</span><output data-for="clearance" data-unit="mm" data-digits="2"></output></label>
+              <input type="range" id="clearance" data-param="clearance" min="0.3" max="1.2" step="0.05">
+            </div>
+            <div class="field">
+              <label for="wall"><span data-i18n="fit.wall">Paroi de la coque</span><output data-for="wall" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="wall" data-param="wall" min="1.2" max="4" step="0.1">
+            </div>
+            <div class="field">
+              <label for="bossDiameter"><span data-i18n="fit.boss">Diamètre du fourreau</span><output data-for="bossDiameter" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="bossDiameter" data-param="bossDiameter" min="5.2" max="6.2" step="0.1">
+            </div>
+            <div class="field">
+              <label for="chamfer"><span data-i18n="fit.chamfer">Chanfrein de première couche</span><output data-for="chamfer" data-unit="mm" data-digits="1"></output></label>
+              <input type="range" id="chamfer" data-param="chamfer" min="0" max="0.8" step="0.1">
+            </div>
+            <div class="field">
+              <label for="pinStyle"><span data-i18n="fit.pins">Dessous du switch</span></label>
+              <select id="pinStyle" data-param="pinStyle">
+                <option value="void" data-i18n="fit.pins.void">Cavité tolérante</option>
+                <option value="holes" data-i18n="fit.pins.holes">Trous exacts</option>
+              </select>
+            </div>
+            <p class="note" data-i18n="fit.hint"></p>
+            <button type="button" class="chip" id="resetFit" data-i18n="fit.reset">Valeurs par défaut</button>
+          </div>
+        </details>
+
+        <details class="sec">
+          <summary data-i18n="print.title">Impression</summary>
+          <div class="sec-body">
+            <div class="field">
+              <label for="bed"><span data-i18n="print.printer">Imprimante</span></label>
+              <select id="bed" data-param="bed" data-number>
+                <option value="180" data-i18n="print.a1mini">Bambu Lab A1 mini (180 mm)</option>
+                <option value="256" data-i18n="print.big">Autre Bambu / Orca (256 mm)</option>
+              </select>
+            </div>
+            <p class="note" data-i18n="print.hint"></p>
+          </div>
+        </details>
+
+        <p class="foot" data-i18n="foot.license"></p>
+      </div>
+
+      <div class="exportbar" id="exportbar">
+        <dl class="stats" id="stats"></dl>
+        <div class="buttons">
+          <button type="button" class="keybtn primary" id="dl3mf"><span data-i18n="exp.3mf">Télécharger le .3mf</span></button>
+          <button type="button" class="keybtn" id="dlstl"><span data-i18n="exp.stl">Pièces en STL (.zip)</span></button>
+        </div>
+        <p class="note" id="exportNote" data-i18n="exp.3mf.hint"></p>
+      </div>
+    </aside>
+
+    <section class="stage" id="stage" aria-label="Aperçu">
+      <div class="busy" id="busy" hidden></div>
+      <canvas id="gl" tabindex="0" aria-label="Aperçu 3D du clicker. Espace : presser."></canvas>
+      <canvas id="top2d" hidden></canvas>
+      <svg class="dims" id="dims" aria-hidden="true"></svg>
+
+      <div class="stage-top">
+        <div class="seg tabs" role="tablist" id="viewTabs">
+          <button type="button" role="tab" data-view="3d" aria-selected="true" data-i18n="view.3d">3D</button>
+          <button type="button" role="tab" data-view="top" aria-selected="false" data-i18n="view.top">Dessus</button>
+        </div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+      </div>
+
+      <div class="stage-bottom" id="bar3d">
+        <label class="mini slider-inline"><span data-i18n="view.explode">Éclaté</span>
+          <input type="range" id="explode" min="0" max="1" step="0.01" value="0"></label>
+        <button type="button" class="keybtn press" id="press"><span data-i18n="view.press">Presser</span></button>
+        <div class="tgls">
+          <label class="toggle sm"><input type="checkbox" id="tSwitch"><i></i><span data-i18n="view.switch">Switch</span></label>
+          <label class="toggle sm"><input type="checkbox" id="tCut"><i></i><span data-i18n="view.cut">Coupe</span></label>
+          <label class="toggle sm"><input type="checkbox" id="tDims" checked><i></i><span data-i18n="view.dims">Cotes</span></label>
+          <label class="toggle sm"><input type="checkbox" id="tSound" checked><i></i><span data-i18n="view.sound">Son</span></label>
+        </div>
+      </div>
+      <div class="stage-bottom" id="barTop" hidden>
+        <label class="mini slider-inline"><span data-i18n="view.topAngle">Angle du switch</span>
+          <input type="range" id="angle" min="0" max="90" step="1" value="0"><output id="angleOut"></output></label>
+        <button type="button" class="chip" id="angleAuto" data-i18n="view.topAuto">Auto</button>
+      </div>
+      <p class="hint-press" data-i18n="view.hint"></p>
+    </section>
+  </main>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

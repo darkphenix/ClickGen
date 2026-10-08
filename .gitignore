@@ -1,0 +1,6 @@
+node_modules/
+scratch_*.mjs
+result.json
+*.3mf
+.DS_Store
+.claude/

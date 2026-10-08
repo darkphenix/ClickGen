@@ -1,0 +1,12 @@
+{
+  "name": "clickgen",
+  "version": "0.1.0",
+  "description": "Génère des clickers 3D imprimables (switch mécanique MX) à partir d'une image.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "serve": "node tools/serve.mjs"
+  }
+}
