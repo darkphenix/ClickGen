@@ -6,11 +6,11 @@ import { blur } from './image/raster.js';
 import { segmentImage } from './image/segment.js';
 import { quantizeColors } from './image/quantize.js';
 import { signedArea, simplifyLoop, traceContours } from './image/contours.js';
-import { Scope, getEngine } from './geometry/engine.js';
+import { Scope, getEngine, toMesh } from './geometry/engine.js';
 import { SEG, capOutline, componentAt, pxTransform, shellOutline, toMm } from './geometry/outline.js';
 import { convexHull, fitInside, frameOutline } from './geometry/frames.js';
 import { findPlacement } from './geometry/placement.js';
-import { buildClicker, clickerToMeshes } from './geometry/clicker.js';
+import { buildCap, buildShell } from './geometry/clicker.js';
 
 export class PipelineError extends Error {
   /** @param {'empty'|'nofit'|'toobig'|'geometry'} code */
@@ -97,7 +97,9 @@ function traceLabel(labels, idx, w, h) {
  * Étape 2 : géométrie 3D à partir de l'analyse. Renvoie maillages + données d'aperçu 2D.
  * @param {ReturnType<typeof analyzeImage>} a
  * @param {import('./core/params.js').DEFAULTS} p
- * @param {{onStep?:(s:string)=>Promise<void>|void}} [opts]
+ * @param {{onStep?:(s:string)=>Promise<void>|void, cache?:object}} [opts]
+ *   cache : objet conservé entre deux appels ; la coque et le capuchon dont les entrées n'ont pas changé
+ *   ne sont pas reconstruits (les maillages en cache sont partagés : à ne pas modifier).
  */
 export async function makeClicker(a, p, opts = {}) {
   const wasm = await getEngine();
@@ -231,15 +233,46 @@ export async function makeClicker(a, p, opts = {}) {
     }
 
     // --- 3D ---------------------------------------------------------------------------------------
+    // La coque et le capuchon sont mis en cache séparément : un réglage qui ne touche que l'un des deux
+    // ne reconstruit pas l'autre.
     await step('solid');
-    let res;
-    try {
-      res = buildClicker(wasm, scope, S, cap, placement, art, { ...p });
-    } catch (e) {
-      throw new PipelineError('geometry', e.message);
+    const cache = opts.cache ?? null;
+    const key = (o) => JSON.stringify(o, (_, v) => (typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v));
+    const capPolys = cap.toPolygons();
+    const shellKey = key({
+      S: S.toPolygons(), cap: capPolys, pl: [placement.x, placement.y, placement.angle], d,
+      wall: p.wall, clearance: p.clearance, pocketFit: p.pocketFit, pinStyle: p.pinStyle, chamfer: p.chamfer,
+      keyring: p.keyring, keyringAngle: p.keyringAngle,
+    });
+    const capKey = key({
+      cap: capPolys, art: art.map((x) => [x.index, x.cs.toPolygons()]), pl: [placement.x, placement.y, placement.angle],
+      dims: [d.capH, d.pocketDepth, d.capRim], // seules les cotes que le capuchon utilise
+      bossDiameter: p.bossDiameter, socketFit: p.socketFit, chamfer: p.chamfer, artDepth: p.artDepth, relief: p.relief,
+    });
+    const guard = (fn) => { try { return fn(); } catch (e) { throw new PipelineError('geometry', e.message); } };
+
+    let shellOut = cache?.shell?.key === shellKey ? cache.shell.value : null;
+    if (!shellOut) {
+      shellOut = guard(() => {
+        const r = buildShell(wasm, scope, S, cap, placement, { ...p });
+        return { shell: { mesh: toMesh(r.shell), volume: r.shell.volume() }, keyring: r.keyring };
+      });
+      if (cache) cache.shell = { key: shellKey, value: shellOut };
     }
-    const meshes = clickerToMeshes(res);
-    warnings.push(...res.warnings.map((w) => ({ code: 'note', text: w })));
+    let capOut = cache?.cap?.key === capKey ? cache.cap.value : null;
+    if (!capOut) {
+      capOut = guard(() => {
+        const r = buildCap(wasm, scope, cap, placement, art, { ...p });
+        return {
+          capBody: { mesh: toMesh(r.capBody), volume: r.capBody.volume() },
+          arts: r.arts.map((x) => ({ index: x.index, mesh: toMesh(x.manifold), volume: x.manifold.volume() })),
+          warnings: r.warnings,
+        };
+      });
+      if (cache) cache.cap = { key: capKey, value: capOut };
+    }
+    const meshes = { shell: shellOut.shell, capBody: capOut.capBody, arts: capOut.arts, dims: d, warnings: capOut.warnings, keyring: shellOut.keyring };
+    warnings.push(...capOut.warnings.map((w) => ({ code: 'note', text: w })));
 
     const preview = {
       shell: S.toPolygons(),

@@ -4,38 +4,44 @@
 // capuchon au repos (son bord est à z = capRim, sa face décor est au-dessus).
 // Tout est une pile de prismes 2D (CrossSection) combinés en 3D : aucune CSG fragile sur des
 // surfaces gauches, donc des maillages toujours étanches.
+//
+// La coque et le capuchon se construisent séparément (buildShell, buildCap) : le pipeline met chacun en
+// cache et ne reconstruit que celui dont les entrées ont changé.
 
 import { MECH, PIN_HOLES, SWITCH, derive } from '../core/params.js';
 import { SEG } from './outline.js';
 import { toMesh } from './engine.js';
 
+/** Place des formes 2D dans le repère du switch (centre, rotation). */
+function switchFrame(wasm, T, placement) {
+  const { CrossSection } = wasm;
+  const { x, y, angle } = placement;
+  const onSwitch = (cs) => T(T(cs.rotate(angle)).translate(x, y));
+  const square = (side) => onSwitch(T(CrossSection.square([side, side], true)));
+  return { onSwitch, square };
+}
+
 /**
+ * Coque : fond plein, cavité sous le switch, logement carré, cavité du capuchon, anneau éventuel.
  * @param {{Manifold:any,CrossSection:any}} wasm
  * @param {{add:(o:any)=>any}} scope
  * @param {any} S silhouette de la coque (CrossSection du scope)
  * @param {any} cap contour du capuchon, composante qui porte le switch (CrossSection du scope)
  * @param {{x:number,y:number,angle:number}} placement
- * @param {{index:number, cs:any}[]} art régions de décor (CrossSection du scope), déjà disjointes
  * @param {import('../core/params.js').DEFAULTS} p
  */
-export function buildClicker(wasm, scope, S, cap, placement, art, p) {
+export function buildShell(wasm, scope, S, cap, placement, p) {
   const { Manifold, CrossSection } = wasm;
   const T = (x) => scope.add(x);
   const d = derive(p);
-  const { x: px, y: py, angle } = placement;
-  const warnings = [];
+  const { x: px, y: py } = placement;
+  const { onSwitch, square } = switchFrame(wasm, T, placement);
 
-  // ---- contours ------------------------------------------------------------------------
   const cavity = T(cap.offset(p.clearance, 'Round', 2, SEG));
-
-  const onSwitch = (cs) => T(T(cs.rotate(angle)).translate(px, py));
-  const square = (side) => onSwitch(T(CrossSection.square([side, side], true)));
-
   const pocket = square(d.pocket);
   const stray = T(pocket.subtract(cavity)).area();
   if (stray > 0.05) throw new Error(`Le logement du switch déborde de la cavité (${stray.toFixed(2)} mm²)`);
 
-  // ---- coque -----------------------------------------------------------------------------
   let pinCut;
   if (p.pinStyle === 'holes') {
     const holes = PIN_HOLES.map((h) => T(T(CrossSection.circle(h.d / 2, 32)).translate(h.x, h.y)));
@@ -63,8 +69,24 @@ export function buildClicker(wasm, scope, S, cap, placement, art, p) {
     shell = T(T(Manifold.union([shell, lug])).subtract(hole));
     keyring = { x: lx, y: ly, r: LUG.radius, hole: LUG.hole };
   }
+  if (shell.isEmpty() || shell.status() !== 'NoError') throw new Error(`maillage coque invalide (${shell.status()})`);
+  return { shell, keyring };
+}
 
-  // ---- capuchon (repère local : bord à z = 0, face décor à z = capH) --------------------
+/**
+ * Capuchon : corps, relief sous la face, fourreau et croix, couches de décor.
+ * @param {any} cap contour du capuchon (CrossSection du scope)
+ * @param {{index:number, cs:any}[]} art régions de décor (CrossSection du scope), déjà disjointes
+ */
+export function buildCap(wasm, scope, cap, placement, art, p) {
+  const { Manifold, CrossSection } = wasm;
+  const T = (x) => scope.add(x);
+  const d = derive(p);
+  const { x: px, y: py, angle } = placement;
+  const { onSwitch } = switchFrame(wasm, T, placement);
+  const warnings = [];
+
+  // repère local : bord à z = 0, face décor à z = capH
   let body = extrudeChamfer(wasm, T, cap, d.capH, 0, p.chamfer);
 
   const rim = MECH.capPocketRim, ceil = MECH.capPocketCeil;
@@ -94,7 +116,7 @@ export function buildClicker(wasm, scope, S, cap, placement, art, p) {
   body = T(body.subtract(T(Manifold.union(socketParts))));
 
   // décor : couches de couleur découpées dans la face du capuchon
-  const artMeshes = [];
+  const arts = [];
   const zTop = d.capH - p.artDepth;
   const capInset = p.relief > 0 ? T(cap.offset(-p.chamfer - 0.1, 'Round', 2, SEG)) : null;
   for (const a of art) {
@@ -106,14 +128,18 @@ export function buildClicker(wasm, scope, S, cap, placement, art, p) {
       const lift = T(T(T(a.cs.intersect(capInset)).extrude(p.relief)).translate(0, 0, d.capH));
       piece = T(Manifold.union([piece, lift]));
     }
-    artMeshes.push({ index: a.index, manifold: T(piece.translate(0, 0, d.capRim)) });
+    arts.push({ index: a.index, manifold: T(piece.translate(0, 0, d.capRim)) });
   }
   const capBody = T(body.translate(0, 0, d.capRim));
+  if (capBody.isEmpty() || capBody.status() !== 'NoError') throw new Error(`maillage capuchon invalide (${capBody.status()})`);
+  return { capBody, arts, warnings };
+}
 
-  for (const [name, m] of [['coque', shell], ['capuchon', capBody]]) {
-    if (m.isEmpty() || m.status() !== 'NoError') throw new Error(`maillage ${name} invalide (${m.status()})`);
-  }
-  return { shell, capBody, arts: artMeshes, dims: d, warnings, keyring };
+/** Les deux pièces d'un coup (tests, usage simple). */
+export function buildClicker(wasm, scope, S, cap, placement, art, p) {
+  const s = buildShell(wasm, scope, S, cap, placement, p);
+  const c = buildCap(wasm, scope, cap, placement, art, p);
+  return { shell: s.shell, capBody: c.capBody, arts: c.arts, dims: derive(p), warnings: c.warnings, keyring: s.keyring };
 }
 
 /** Patte porte-clés (mm) : disque de rayon `radius`, épaisseur `height`, trou de rayon `hole` (anneau de 3 mm). */
@@ -156,16 +182,17 @@ export function clickerToMeshes(res) {
 }
 
 /**
- * Extrusion de z=0 à z=h avec chanfrein optionnel en bas (cb) et en haut (ct),
- * approché par 3 marches (l'imprimante fait de toute façon des couches).
+ * Extrusion de z=0 à z=h avec chanfrein optionnel en bas (cb) et en haut (ct), approché par 2 marches
+ * (l'imprimante fait de toute façon des couches). Jointure « Miter » : un décalage vers l'intérieur d'un
+ * contour n'a pas besoin d'arrondis aux angles convexes, et c'est deux fois plus rapide.
  */
-function extrudeChamfer(wasm, T, cs, h, cb, ct, steps = 3) {
+function extrudeChamfer(wasm, T, cs, h, cb, ct, steps = 2) {
   const { Manifold } = wasm;
   const zb = cb > 0.01 ? Math.min(cb, h / 3) : 0;
   const zt = ct > 0.01 ? Math.min(ct, h / 3) : 0;
   const slabs = [];
   const prism = (inset, z0, z1) => {
-    const base = inset > 0 ? T(cs.offset(-inset, 'Round', 2, SEG)) : cs;
+    const base = inset > 0 ? T(cs.offset(-inset, 'Miter', 2, SEG)) : cs;
     return T(T(base.extrude(z1 - z0)).translate(0, 0, z0));
   };
   for (let i = 0; i < steps && zb; i++) {

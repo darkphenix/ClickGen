@@ -47,12 +47,13 @@ export function blur(field, w, h, sigma) {
 function boxH(src, dst, w, h, r) {
   const inv = 1 / (2 * r + 1);
   for (let y = 0; y < h; y++) {
-    const row = y * w;
+    const row = y * w, first = src[row], last = src[row + w - 1];
     let acc = 0;
-    for (let x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
+    for (let x = -r; x <= r; x++) acc += x < 0 ? first : x >= w ? last : src[row + x];
     for (let x = 0; x < w; x++) {
       dst[row + x] = acc * inv;
-      acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+      const add = x + r + 1, rem = x - r;
+      acc += (add >= w ? last : src[row + add]) - (rem < 0 ? first : src[row + rem]);
     }
   }
 }
@@ -60,11 +61,13 @@ function boxH(src, dst, w, h, r) {
 function boxV(src, dst, w, h, r) {
   const inv = 1 / (2 * r + 1);
   for (let x = 0; x < w; x++) {
+    const first = src[x], last = src[(h - 1) * w + x];
     let acc = 0;
-    for (let y = -r; y <= r; y++) acc += src[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = -r; y <= r; y++) acc += y < 0 ? first : y >= h ? last : src[y * w + x];
     for (let y = 0; y < h; y++) {
       dst[y * w + x] = acc * inv;
-      acc += src[Math.min(h - 1, y + r + 1) * w + x] - src[Math.max(0, y - r) * w + x];
+      const add = y + r + 1, rem = y - r;
+      acc += (add >= h ? last : src[add * w + x]) - (rem < 0 ? first : src[rem * w + x]);
     }
   }
 }
@@ -182,6 +185,23 @@ export function connectedComponents(mask, w, h) {
     next++;
   }
   return { labels, areas };
+}
+
+/** Boîte englobante des pixels dont la valeur atteint `level`. */
+export function fieldBounds(field, w, h, level = 0.5) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      if (field[row + x] >= level) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1: x1 + 1, y1: y1 + 1 };
 }
 
 /** Boîte englobante des pixels non nuls. */

@@ -103,3 +103,19 @@ test('décor en relief : la couche dépasse du capuchon de la hauteur demandée'
   });
   assert.ok(tops.some((z) => near(z, d.capTopRest + 1.0, 0.02)), JSON.stringify(tops));
 });
+
+test('cache : un réglage du capuchon ne reconstruit pas la coque, et inversement', async () => {
+  const cache = {};
+  const base = { ...DEFAULTS };
+  const a = analyzeImage(bearImage(500, true), base);
+  const r1 = await makeClicker(a, base, { cache });
+  const r2 = await makeClicker(a, { ...base, socketFit: 0.1 }, { cache });
+  assert.equal(r2.meshes.shell, r1.meshes.shell, 'coque réutilisée');
+  assert.notEqual(r2.meshes.capBody, r1.meshes.capBody, 'capuchon reconstruit');
+  const r3 = await makeClicker(a, { ...base, socketFit: 0.1, pocketFit: 0.1 }, { cache });
+  assert.notEqual(r3.meshes.shell, r2.meshes.shell, 'coque reconstruite');
+  assert.equal(r3.meshes.capBody, r2.meshes.capBody, 'capuchon réutilisé');
+  // même résultat qu'un calcul sans cache
+  const fresh = await makeClicker(a, { ...base, socketFit: 0.1, pocketFit: 0.1 });
+  assert.equal(fresh.meshes.capBody.volume.toFixed(3), r3.meshes.capBody.volume.toFixed(3));
+});

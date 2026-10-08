@@ -13,6 +13,7 @@ import { buildCoupon, couponToMesh } from './geometry/coupon.js';
 let img = null;
 let imgVersion = 0;
 let cache = { key: '', value: null };
+const buildCache = {}; // maillages de la coque et du capuchon déjà construits (voir pipeline.js)
 let pending = null;
 let running = false;
 
@@ -58,12 +59,20 @@ async function drain() {
     const key = `${imgVersion}|${MASK_KEYS.map((k) => String(p[k])).join('|')}|${isFramed(p) ? 'frame' : 'outline'}`;
     if (cache.key !== key) cache = { key, value: analyzeImage(img, p) };
     const a = cache.value;
-    const result = await makeClicker(a, p);
+    const result = await makeClicker(a, p, { cache: buildCache });
+    // les maillages en cache restent ici : on envoie des copies (transférer les tampons les viderait)
     const transfer = [];
-    const take = (mesh) => { transfer.push(mesh.positions.buffer, mesh.indices.buffer); };
-    take(result.meshes.shell.mesh);
-    take(result.meshes.capBody.mesh);
-    for (const art of result.meshes.arts) take(art.mesh);
+    const send = (item) => {
+      const mesh = { positions: item.mesh.positions.slice(), indices: item.mesh.indices.slice() };
+      transfer.push(mesh.positions.buffer, mesh.indices.buffer);
+      return { ...item, mesh };
+    };
+    result.meshes = {
+      ...result.meshes,
+      shell: send(result.meshes.shell),
+      capBody: send(result.meshes.capBody),
+      arts: result.meshes.arts.map(send),
+    };
     self.postMessage({
       type: 'result',
       id: job.id,

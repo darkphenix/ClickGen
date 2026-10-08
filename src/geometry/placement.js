@@ -89,26 +89,41 @@ export function findPlacement(polys, keepOut, opts = {}) {
   if (!polys.length) return null;
   const b = polysBounds(polys);
   if (Math.min(b.w, b.h) < keepOut * 0.7 && Math.max(b.w, b.h) < keepOut) return null;
-  const res = opts.res ?? Math.max(0.2, Math.min(0.5, Math.max(b.w, b.h) / 260));
+  const resFine = opts.res ?? Math.max(0.2, Math.min(0.5, Math.max(b.w, b.h) / 260));
+  const resCoarse = Math.max(resFine, 0.6);
   const [gx, gy] = centroid(polys);
   const size = Math.max(b.w, b.h);
 
-  const tryAngles = (angles) => {
-    let best = null;
+  /**
+   * Meilleure position parmi `angles`, à la résolution `res`. `win` limite la recherche à un disque
+   * {x, y, r} (affinage local autour d'un premier résultat).
+   */
+  const search = (angles, res, win = null) => {
+    let best = null, bestScore = -Infinity;
+    const cand = { x: 0, y: 0, angle: 0, clearance: 0, dCentroid: 0, size };
     for (const angle of angles) {
       const th = (angle * Math.PI) / 180;
       const c = Math.cos(th), s = Math.sin(th);
       const rot = polys.map((p) => p.map(([x, y]) => [x * c + y * s, -x * s + y * c]));
       const rb = polysBounds(rot);
       const pad = 2 * res;
-      const ox = rb.x0 - pad, oy = rb.y0 - pad;
-      const W = Math.ceil((rb.w + 2 * pad) / res), H = Math.ceil((rb.h + 2 * pad) / res);
-      const mask = rasterize(rot, ox, oy, W, H, res);
+      let ox = rb.x0 - pad, oy = rb.y0 - pad;
+      let W = Math.ceil((rb.w + 2 * pad) / res), H = Math.ceil((rb.h + 2 * pad) / res);
+      if (win) {
+        // affinage : on ne rastérise qu'une boîte autour de la fenêtre (le calcul est ~5 fois plus court)
+        const wx = win.x * c + win.y * s, wy = -win.x * s + win.y * c; // centre de la fenêtre, repère tourné
+        const hb = win.r + keepOut / 2 + 2 * pad + 1;
+        const bx0 = Math.max(ox, wx - hb), by0 = Math.max(oy, wy - hb);
+        const bx1 = Math.min(ox + W * res, wx + hb), by1 = Math.min(oy + H * res, wy + hb);
+        ox = bx0; oy = by0;
+        W = Math.ceil((bx1 - bx0) / res); H = Math.ceil((by1 - by0) / res);
+      }
       // bloc impair de cellules, + 1 cellule de marge de chaque côté
       let kc = Math.ceil(keepOut / res) + 2;
       if (kc % 2 === 0) kc++;
       const half = (kc - 1) >> 1;
       if (kc > W || kc > H) continue;
+      const mask = rasterize(rot, ox, oy, W, H, res);
       // image intégrale
       const SW = W + 1;
       const integ = new Int32Array(SW * (H + 1));
@@ -126,34 +141,47 @@ export function findPlacement(polys, keepOut, opts = {}) {
           const sum = integ[(j + half + 1) * SW + i + half + 1] - integ[(j - half) * SW + i + half + 1]
             - integ[(j + half + 1) * SW + i - half] + integ[(j - half) * SW + i - half];
           if (sum !== full) continue;
+          const xr = ox + (i + 0.5) * res, yr = oy + (j + 0.5) * res;
+          const x = xr * c - yr * s, y = xr * s + yr * c;
+          if (win && Math.hypot(x - win.x, y - win.y) > win.r) continue;
           if (!edt) {
             const inv = new Uint8Array(W * H);
             for (let t = 0; t < inv.length; t++) inv[t] = mask[t] ? 0 : 1;
             edt = distanceTransform(inv, W, H);
           }
-          const xr = ox + (i + 0.5) * res, yr = oy + (j + 0.5) * res;
-          const x = xr * c - yr * s, y = xr * s + yr * c;
-          const clearance = edt[j * W + i] * res;
-          const cand = { x, y, angle, clearance, dCentroid: Math.hypot(x - gx, y - gy), size };
-          cand.score = scoreCandidate(cand);
-          if (!best || cand.score > best.score) best = cand;
+          cand.x = x; cand.y = y; cand.angle = angle;
+          cand.clearance = edt[j * W + i] * res;
+          cand.dCentroid = Math.hypot(x - gx, y - gy);
+          const score = scoreCandidate(cand);
+          if (score > bestScore) { bestScore = score; best = { x, y, angle, clearance: cand.clearance }; }
         }
       }
     }
     return best;
   };
 
+  const wrap = (a) => ((a % 90) + 90) % 90;
+  const coarseAngles = [];
+  for (let a = 0; a < 90; a += 7.5) coarseAngles.push(a);
+
   let best;
   if (opts.angles?.length) {
-    best = tryAngles(opts.angles); // angle imposé par l'utilisateur
+    best = search(opts.angles, resFine); // angle imposé par l'utilisateur
   } else {
-    const coarse = [];
-    for (let a = 0; a < 90; a += 7.5) coarse.push(a);
-    best = tryAngles(coarse);
-    if (!best) {
-      const fine = [];
-      for (let a = 0; a < 90; a += 2.5) if (a % 7.5 !== 0) fine.push(a);
-      best = tryAngles(fine);
+    // 1) passe grossière sur tous les angles (rapide) ; 2) affinage local à la résolution fine
+    best = search(coarseAngles, resCoarse);
+    if (best) {
+      const near = [...new Set([best.angle - 3.75, best.angle, best.angle + 3.75].map(wrap))];
+      best = search(near, resFine, { x: best.x, y: best.y, r: 3 })
+        ?? search(coarseAngles, resFine); // rarissime : détail plus fin que la grille grossière
+    } else {
+      // forme juste : la marge de la grille grossière peut avoir tout refusé, on cherche finement
+      best = search(coarseAngles, resFine);
+      if (!best) {
+        const fine = [];
+        for (let a = 0; a < 90; a += 2.5) if (a % 7.5 !== 0) fine.push(a);
+        best = search(fine, resFine);
+      }
     }
   }
   if (!best) return null;

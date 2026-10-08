@@ -26,6 +26,34 @@ const SHELL_DARK = '#2b2f36';
 const SHELL_LIGHT = '#e4e7ee';
 const TEXT_BG = '#2a5de8'; // fond par défaut d'un clicker « texte » : le bleu des switches clicky
 const NOT_PERSISTED = ['placementAngle', 'bgColor'];
+// Seuls les réglages « machine » survivent d'une visite à l'autre : ajustements, imprimante, tailles.
+// La forme, le cadre, l'anneau… dépendent de l'image et repartent des valeurs par défaut.
+const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'artDepth', 'relief', 'size', 'autoGrow'];
+
+/**
+ * Navigation au clavier d'un groupe d'onglets ou de boutons radio : flèches, Début, Fin, avec « tabindex
+ * itinérant » (un seul bouton dans l'ordre de tabulation). `selectedAttr` : aria-selected ou aria-checked.
+ */
+function bindRovingGroup(group, selectedAttr, onActivate) {
+  const buttons = () => $$('button', group);
+  const sync = () => buttons().forEach((b) => { b.tabIndex = b.getAttribute(selectedAttr) === 'true' ? 0 : -1; });
+  new MutationObserver(sync).observe(group, { subtree: true, attributes: true, attributeFilter: [selectedAttr] });
+  sync();
+  group.addEventListener('keydown', (e) => {
+    const list = buttons();
+    const i = list.indexOf(document.activeElement);
+    if (i < 0) return;
+    let j = i;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % list.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + list.length) % list.length;
+    else if (e.key === 'Home') j = 0;
+    else if (e.key === 'End') j = list.length - 1;
+    else return;
+    e.preventDefault();
+    list[j].focus();
+    onActivate(list[j]);
+  });
+}
 
 // ------------------------------------------------------------------ état --
 const store = {
@@ -73,12 +101,11 @@ function sanitizeParams(src) {
 function loadParams() {
   let saved = {};
   try { saved = JSON.parse(safeGet(LS_PARAMS) || '{}'); } catch { /* réglages illisibles */ }
-  return { ...DEFAULTS, ...sanitizeParams(saved), placementAngle: null, bgColor: null };
+  const keep = Object.fromEntries(Object.entries(sanitizeParams(saved)).filter(([k]) => PERSISTED.includes(k)));
+  return { ...DEFAULTS, ...keep, placementAngle: null, bgColor: null };
 }
 function saveParams() {
-  const copy = { ...params };
-  for (const k of NOT_PERSISTED) delete copy[k];
-  safeSet(LS_PARAMS, JSON.stringify(copy));
+  safeSet(LS_PARAMS, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, params[k]]))));
 }
 
 function loadText() {
@@ -163,6 +190,7 @@ function bindParams() {
     params.colorCount = Number(b.dataset.val);
     syncAll(); saveParams(); requestRun();
   });
+  bindRovingGroup($('#colorCount'), 'aria-checked', (b) => b.click());
   $('#resetFit').addEventListener('click', () => {
     for (const k of FIT_KEYS) params[k] = DEFAULTS[k];
     syncAll(); saveParams(); requestRun(0);
@@ -297,6 +325,7 @@ function bindText() {
     const b = e.target.closest('button[data-src]');
     if (b) setSource(b.dataset.src);
   });
+  bindRovingGroup($('#srcTabs'), 'aria-selected', (b) => setSource(b.dataset.src));
 }
 
 function scheduleText(delay = 320) {
@@ -673,6 +702,8 @@ function bindStage() {
     viewer?.setActive(is3d);
     topview.setActive(!is3d);
   });
+
+  bindRovingGroup(tabs, 'aria-selected', (b) => b.click());
 
   const press = $('#press');
   const down = () => { viewer?.pressDown(); press.classList.add('down'); };

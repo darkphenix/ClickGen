@@ -4,7 +4,7 @@ import {
   blur,
   connectedComponents,
   floodOutside,
-  maskBounds,
+  fieldBounds,
   rgbToLab,
 } from './raster.js';
 
@@ -71,7 +71,7 @@ export function segmentImage(img, opts = {}) {
     if (!filled[i] && fg[i] > 0 && fg[i] < 0.5 && nearFilled(filled, i, w, h)) field[i] = fg[i];
   }
   blur(field, w, h, 0.8);
-  const bounds = maskBounds(field.map((v) => (v >= 0.5 ? 1 : 0)), w, h);
+  const bounds = fieldBounds(field, w, h, 0.5);
   return { w, h, field, solid: filled, bounds, mode, bg };
 }
 
