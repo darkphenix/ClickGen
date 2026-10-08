@@ -11,7 +11,7 @@ Tout se calcule dans votre navigateur : vos images ne quittent pas votre ordinat
 ## Utiliser
 
 - **En local** : `npm run serve` (Node 18 ou plus), puis <http://localhost:5173>. Un serveur HTTP est nécessaire : le calcul 3D tourne dans un Web Worker avec du WebAssembly, ce qui ne fonctionne pas depuis `file://`.
-- **En ligne** : le dossier est un site statique, il se publie tel quel (GitHub Pages, Netlify…). Rien à construire.
+- **En ligne** : le dossier est un site statique, il se publie tel quel (GitHub Pages, Netlify…). Rien à construire. Tous les chemins sont relatifs : le site fonctionne aussi sous un préfixe (`/clickgen/`). Derrière un proxy inverse, `NODE_ENV=production HOST=0.0.0.0 PORT=8034 node tools/serve.mjs` sert le site avec ETag, gzip et cache (les fichiers cachés et les méthodes d'écriture sont refusés).
 
 ## Ce qu'il vous faut
 

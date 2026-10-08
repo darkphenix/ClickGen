@@ -11,7 +11,7 @@ Everything runs in your browser: your images never leave your computer and no ne
 ## Use it
 
 - **Locally**: `npm run serve` (Node 18+), then <http://localhost:5173>. An HTTP server is required: the 3D computation runs in a Web Worker with WebAssembly, which does not work from `file://`.
-- **Online**: the folder is a static site, publish it as is (GitHub Pages, Netlify…). There is nothing to build.
+- **Online**: the folder is a static site, publish it as is (GitHub Pages, Netlify…). There is nothing to build. All paths are relative: the site also works under a prefix (`/clickgen/`). Behind a reverse proxy, `NODE_ENV=production HOST=0.0.0.0 PORT=8034 node tools/serve.mjs` serves the site with ETag, gzip and caching (hidden files and write methods are refused).
 
 ## What you need
 
