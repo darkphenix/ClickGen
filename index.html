@@ -255,6 +255,14 @@
                 <option value="0.28" data-i18n="layer.fast">0,28 mm : rapide</option>
               </select>
             </div>
+            <div class="field">
+              <label for="plates"><span data-i18n="print.plates">Disposition</span></label>
+              <select id="plates" data-param="plates" data-number>
+                <option value="2" data-i18n="plates.two">Deux plateaux : coque, puis capuchon</option>
+                <option value="1" data-i18n="plates.one">Un seul plateau</option>
+              </select>
+            </div>
+            <p class="note" data-i18n="print.platesHint"></p>
             <p class="note" data-i18n="print.hint"></p>
           </div>
         </details>
@@ -263,7 +271,7 @@
           <summary data-i18n="help.title">Imprimer et assembler</summary>
           <div class="sec-body">
             <ol class="steps">
-              <li data-i18n="help.1">Téléchargez le .3mf et ouvrez-le dans Bambu Studio : deux objets (la coque et le capuchon retourné), un filament par couleur.</li>
+              <li data-i18n="help.1">Téléchargez le .3mf et ouvrez-le dans Bambu Studio : la coque (plateau 1) et le capuchon retourné (plateau 2), un filament par couleur. Imprimez les deux plateaux.</li>
               <li data-i18n="help.2">Imprimez sans supports, en PLA, buse 0,4 mm, couches de 0,16 à 0,20 mm.</li>
               <li data-i18n="help.3">Enfoncez le switch par le haut dans le logement (broches vers le bas), puis poussez le capuchon sur la tige jusqu'à ce qu'il soit bien assis.</li>
               <li data-i18n="help.4">Trop serré ou trop lâche ? Imprimez le banc d'essai (section Ajustements) et reportez le meilleur réglage.</li>

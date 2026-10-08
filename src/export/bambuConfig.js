@@ -11,7 +11,8 @@ const NOT_PER_FILAMENT = /^(machine_|printable_area|bed_exclude_area|head_wrap|w
 /**
  * @param {Record<string, any>} template contenu de templates/bambu-a1mini.json
  * @param {string[]} colors couleurs des filaments (#rrggbb), une par filament utilisé
- * @param {{supports?:boolean, tower?:{x:number,y:number}|null, layerHeight?:number}} [opts]
+ * @param {{supports?:boolean, tower?:{x:number,y:number}|null, towers?:({x:number,y:number}|null)[], layerHeight?:number}} [opts]
+ *   towers : une position de tour de purge par plateau (prioritaire sur `tower`, qui vaut pour un seul plateau)
  */
 export function bambuProjectSettings(template, colors, opts = {}) {
   const cfg = structuredClone(template);
@@ -50,10 +51,13 @@ export function bambuProjectSettings(template, colors, opts = {}) {
     cfg.top_shell_layers = String(Math.max(3, Math.ceil(0.96 / h)));
     cfg.bottom_shell_layers = String(Math.max(3, Math.ceil(0.6 / h)));
   }
-  // tour de purge : un seul plateau -> une seule position (coin inférieur gauche de la tour)
-  if (opts.tower) {
-    cfg.wipe_tower_x = [String(+opts.tower.x.toFixed(3))];
-    cfg.wipe_tower_y = [String(+opts.tower.y.toFixed(3))];
+  // tour de purge : une position par plateau (coin inférieur gauche, repère local du plateau) ;
+  // un plateau sans tour reçoit une valeur neutre, qu'il n'utilisera pas
+  const towers = opts.towers ?? (opts.tower ? [opts.tower] : null);
+  if (towers?.length) {
+    const num = (v) => String(+(Number.isFinite(v) ? v : 15).toFixed(3));
+    cfg.wipe_tower_x = towers.map((t) => num(t?.x));
+    cfg.wipe_tower_y = towers.map((t) => num(t?.y));
   }
   return cfg;
 }

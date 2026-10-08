@@ -9,8 +9,9 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const num = (v) => (Math.abs(v) < 5e-6 ? '0' : String(+v.toFixed(5)));
 
 /**
- * @param {{title:string, objects:import('./layout.js').PrintObject[], filaments:{color:string,name:string}[], thumbnail?:Uint8Array, projectSettings?:Record<string,any>}} o
+ * @param {{title:string, objects:import('./layout.js').PrintObject[], filaments:{color:string,name:string}[], thumbnail?:Uint8Array, projectSettings?:Record<string,any>, plates?:number[][], plateNames?:string[]}} o
  *   projectSettings : contenu de project_settings.config (voir bambuConfig.js), facultatif
+ *   plates : indices d'objets de chaque plateau (par défaut : un seul plateau avec tout) ; plateNames : leurs noms
  * @returns {Uint8Array}
  */
 export function build3mf(o) {
@@ -83,15 +84,19 @@ ${own}${parts}
     <metadata key="filament_maps" value="${Array.from({ length: nFil }, () => 1).join(' ')}"/>
 `
     : '';
+  // plateaux : par défaut tout sur le même ; sinon une liste d'indices d'objets par plateau. Les positions des
+  // objets sont des coordonnées de la scène (le plateau 2 est décalé, voir layout.js : PLATE_PITCH).
+  const plates = o.plates ?? [o.objects.map((_, i) => i)];
+  const plateXml = plates.map((idx, p) => `  <plate>
+    <metadata key="plater_id" value="${p + 1}"/>
+    <metadata key="plater_name" value="${esc(o.plateNames?.[p] ?? '')}"/>
+    <metadata key="locked" value="false"/>
+${plateFilaments}${idx.map((i) => instances[i]).join('\n')}
+  </plate>`);
   files['Metadata/model_settings.config'] = strToU8(`<?xml version="1.0" encoding="UTF-8"?>
 <config>
 ${objCfg.join('\n')}
-  <plate>
-    <metadata key="plater_id" value="1"/>
-    <metadata key="plater_name" value=""/>
-    <metadata key="locked" value="false"/>
-${plateFilaments}${instances.join('\n')}
-  </plate>
+${plateXml.join('\n')}
 </config>
 `);
 

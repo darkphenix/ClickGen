@@ -49,6 +49,12 @@ export function towerSize(nFilaments) {
 }
 
 /**
+ * Écart entre deux plateaux dans la scène d'un 3MF Bambu : 1,2 × la taille du plateau (mesuré : avec des
+ * coordonnées locales, le CLI refuse le 3MF — « un plateau n'a aucun objet entièrement dedans »).
+ */
+export const PLATE_PITCH = 1.2;
+
+/**
  * Dispose les pièces et la tour de purge sur le plateau (carré de côté `bed`).
  * @param {{w:number,h:number}[]} sizes encombrement des pièces
  * @param {{w:number,d:number}|null} tower
@@ -109,8 +115,14 @@ export function arrangeOnBed(bed, sizes, tower, { gap = 10, margin = 6 } = {}) {
 
 /**
  * @param {{shell:{mesh:Mesh}, capBody:{mesh:Mesh}, arts:{index:number, mesh:Mesh}[]}} meshes
- * @param {{slots:{shell:number, cap:number, art:Record<number,number>}, names:{shell:string,cap:string,art:(i:number)=>string}, bed:number, tower?:{w:number,d:number}|null}} cfg
- * @returns {{objects:PrintObject[], fits:boolean, tower:{x:number,y:number}|null, bounds:any}}
+ * @param {{slots:{shell:number, cap:number, art:Record<number,number>}, names:{shell:string,cap:string,art:(i:number)=>string}, bed:number,
+ *   plates?:1|2, tower?:null}} cfg
+ *   plates : 2 = la coque sur le plateau 1, le capuchon sur le plateau 2 (chacun n'imprime que ses couleurs : bien
+ *   moins de changements de filament) ; 1 = tout sur le même plateau.
+ *   tower : `null` = pas de tour de purge (export STL) ; sinon elle est dimensionnée d'après les filaments du plateau.
+ * @returns {{objects:PrintObject[], plates:number[][], fits:boolean, towers:({x:number,y:number}|null)[], bounds:any}}
+ *   objects[i].x/y sont des coordonnées de la scène (décalées de PLATE_PITCH × bed par plateau) ;
+ *   towers[p] est la position de la tour du plateau p, dans le repère local du plateau (celui de la config).
  */
 export function layoutForPrint(meshes, cfg) {
   // --- coque : recentrée en XY, posée sur z = 0 -------------------------------------------------
@@ -137,16 +149,30 @@ export function layoutForPrint(meshes, cfg) {
     capObj.settings = { enable_support: '1', support_type: 'normal(auto)', support_on_build_plate_only: '1' };
   }
 
-  const arranged = arrangeOnBed(
-    cfg.bed,
-    [{ w: sb.x1 - sb.x0, h: sb.y1 - sb.y0 }, { w: cb.x1 - cb.x0, h: cb.y1 - cb.y0 }],
-    cfg.tower ?? null,
-  );
+  const sizes = [{ w: sb.x1 - sb.x0, h: sb.y1 - sb.y0 }, { w: cb.x1 - cb.x0, h: cb.y1 - cb.y0 }];
+  const distinct = (objs) => new Set(objs.flatMap((o) => o.parts.map((q) => q.slot))).size;
+  const towerFor = (objs) => (cfg.tower === null ? null : towerSize(distinct(objs)));
+  // position de la tour à écrire dans la config : coin de l'emprise + décalage dû au brim
+  const inConfig = (spot, size) => (spot ? { x: spot.x + size.pad, y: spot.y + size.pad } : null);
+
+  if (cfg.plates === 2) {
+    const capTower = towerFor([capObj]);
+    const a = arrangeOnBed(cfg.bed, [sizes[0]], null);
+    const b = arrangeOnBed(cfg.bed, [sizes[1]], capTower);
+    [shellObj.x, shellObj.y] = [a.centers[0].x, a.centers[0].y];
+    [capObj.x, capObj.y] = [b.centers[0].x + cfg.bed * PLATE_PITCH, b.centers[0].y];
+    return {
+      objects: [shellObj, capObj], plates: [[0], [1]], fits: a.fits && b.fits,
+      towers: [null, inConfig(b.tower, capTower)], bounds: { shell: sb, cap: cb },
+    };
+  }
+
+  const tower = towerFor([shellObj, capObj]);
+  const arranged = arrangeOnBed(cfg.bed, sizes, tower);
   [shellObj.x, shellObj.y] = [arranged.centers[0].x, arranged.centers[0].y];
   [capObj.x, capObj.y] = [arranged.centers[1].x, arranged.centers[1].y];
-
-  // position de la tour à écrire dans la config : coin de l'emprise + décalage dû au brim
-  const pad = cfg.tower?.pad ?? 0;
-  const tower = arranged.tower ? { x: arranged.tower.x + pad, y: arranged.tower.y + pad } : null;
-  return { objects: [shellObj, capObj], fits: arranged.fits, tower, bounds: { shell: sb, cap: cb } };
+  return {
+    objects: [shellObj, capObj], plates: [[0, 1]], fits: arranged.fits,
+    towers: [inConfig(arranged.tower, tower)], bounds: { shell: sb, cap: cb },
+  };
 }

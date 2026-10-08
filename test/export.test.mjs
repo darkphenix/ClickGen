@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { strFromU8, unzipSync } from '../vendor/fflate/fflate.js';
 import { analyzeImage, makeClicker } from '../src/pipeline.js';
 import { DEFAULTS } from '../src/core/params.js';
-import { arrangeOnBed, layoutForPrint, towerSize } from '../src/export/layout.js';
+import { PLATE_PITCH, arrangeOnBed, layoutForPrint, towerSize } from '../src/export/layout.js';
 import { assignFilaments } from '../src/export/filaments.js';
 import { bambuProjectSettings, loadBambuTemplate } from '../src/export/bambuConfig.js';
 import { build3mf } from '../src/export/threemf.js';
@@ -86,9 +86,9 @@ test('3MF : objets, filaments, signature Bambu et maillages étanches', async ()
   const artColors = Object.fromEntries(result.meshes.arts.map((a) => [a.index, result.colors[a.index].hex]));
   const { filaments, slots } = assignFilaments('#2b2f36', result.colors[0].hex, artColors);
   const lay = layoutForPrint(result.meshes, {
-    slots, names: { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` }, bed: 180, tower: towerSize(filaments.length),
+    slots, names: { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` }, bed: 180, plates: 1,
   });
-  const cfg = bambuProjectSettings(await loadBambuTemplate(), filaments.map((f) => f.color), { tower: lay.tower });
+  const cfg = bambuProjectSettings(await loadBambuTemplate(), filaments.map((f) => f.color), { towers: lay.towers });
   const bytes = build3mf({ title: 'test', objects: lay.objects, filaments, projectSettings: cfg, application: 'BambuStudio-02.06.01.55' });
   const files = unzipSync(bytes);
   assert.deepEqual(Object.keys(files).sort(), ['3D/3dmodel.model', 'Metadata/model_settings.config', 'Metadata/project_settings.config', '[Content_Types].xml', '_rels/.rels']);
@@ -113,7 +113,7 @@ test('3MF : sans relief aucun support ; avec relief, supports sur le capuchon se
   const printed = async (res) => {
     const artColors = Object.fromEntries(res.meshes.arts.map((a) => [a.index, res.colors[a.index].hex]));
     const { filaments, slots } = assignFilaments('#2b2f36', res.colors[0].hex, artColors);
-    const lay = layoutForPrint(res.meshes, { slots, names: { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` }, bed: 180, tower: towerSize(filaments.length) });
+    const lay = layoutForPrint(res.meshes, { slots, names: { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` }, bed: 180, plates: 1 });
     const bytes = build3mf({ title: 't', objects: lay.objects, filaments, application: 'BambuStudio-02.06.01.55' });
     return { lay, settings: strFromU8(unzipSync(bytes)['Metadata/model_settings.config']) };
   };
@@ -126,6 +126,64 @@ test('3MF : sans relief aucun support ; avec relief, supports sur le capuchon se
   // les clés sont dans l'objet « Capuchon », pas dans celui de la coque
   const [shellCfg, capCfg] = raised.settings.split(/<object id=/).slice(1);
   assert.ok(!/enable_support/.test(shellCfg) && /enable_support" value="1"/.test(capCfg));
+});
+
+test('deux plateaux : coque seule, capuchon seul décalé, tour de purge là où il y a des couleurs', async () => {
+  const names = { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` };
+  const artColors = Object.fromEntries(result.meshes.arts.map((a) => [a.index, result.colors[a.index].hex]));
+  const { filaments, slots } = assignFilaments('#2b2f36', result.colors[0].hex, artColors);
+  assert.ok(filaments.length >= 3, 'l\'ours a plusieurs couleurs');
+
+  const two = layoutForPrint(result.meshes, { slots, names, bed: 180, plates: 2 });
+  assert.deepEqual(two.plates, [[0], [1]]);
+  assert.ok(two.fits);
+  const [shell, cap] = two.objects;
+  assert.ok(shell.x > 0 && shell.x < 180 && shell.y > 0 && shell.y < 180, 'la coque est sur le plateau 1');
+  // le plateau 2 est décalé de 1,2 × la taille du plateau dans la scène du 3MF
+  assert.ok(cap.x > PLATE_PITCH * 180 && cap.x < PLATE_PITCH * 180 + 180 && cap.y > 0 && cap.y < 180, `capuchon à x=${cap.x}`);
+  assert.equal(two.towers[0], null, 'la coque seule n\'a besoin d\'aucune tour');
+  const tw = two.towers[1], size = towerSize(3);
+  assert.ok(tw && tw.x >= 0 && tw.y >= 0 && tw.x + size.w <= 180 && tw.y + size.d <= 180, `tour du plateau 2 : ${JSON.stringify(tw)}`);
+
+  // un seul plateau : une seule tour, dimensionnée pour tous les filaments
+  const one = layoutForPrint(result.meshes, { slots, names, bed: 180, plates: 1 });
+  assert.deepEqual(one.plates, [[0, 1]]);
+  assert.equal(one.towers.length, 1);
+  assert.ok(one.towers[0] && one.objects.every((o) => o.x < 180));
+
+  // pas de tour pour l'export STL, ni pour un capuchon d'une seule couleur
+  assert.deepEqual(layoutForPrint(result.meshes, { slots, names, bed: 180, plates: 2, tower: null }).towers, [null, null]);
+  const mono = assignFilaments('#2b2f36', '#ffaa00', {});
+  assert.equal(layoutForPrint(result.meshes, { slots: mono.slots, names, bed: 180, plates: 2 }).towers[1], null);
+});
+
+test('3MF à deux plateaux : un <plate> par plateau, chaque instance au bon plateau, une tour par plateau', async () => {
+  const names = { shell: 'Coque', cap: 'Capuchon', art: (i) => `decor_${i}` };
+  const artColors = Object.fromEntries(result.meshes.arts.map((a) => [a.index, result.colors[a.index].hex]));
+  const { filaments, slots } = assignFilaments('#2b2f36', result.colors[0].hex, artColors);
+  const lay = layoutForPrint(result.meshes, { slots, names, bed: 180, plates: 2 });
+  const cfg = bambuProjectSettings(await loadBambuTemplate(), filaments.map((f) => f.color), { towers: lay.towers });
+  assert.equal(cfg.wipe_tower_x.length, 2, 'une position de tour par plateau');
+  assert.equal(cfg.wipe_tower_y.length, 2);
+  const bytes = build3mf({
+    title: 't', objects: lay.objects, filaments, projectSettings: cfg, application: 'BambuStudio-02.06.01.55',
+    plates: lay.plates, plateNames: ['Coque', 'Capuchon'],
+  });
+  const files = unzipSync(bytes);
+  const ms = strFromU8(files['Metadata/model_settings.config']);
+  const plates = [...ms.matchAll(/<plate>([\s\S]*?)<\/plate>/g)].map((m) => m[1]);
+  assert.equal(plates.length, 2);
+  assert.deepEqual(plates.map((p) => /plater_id" value="(\d+)"/.exec(p)[1]), ['1', '2']);
+  assert.deepEqual(plates.map((p) => /plater_name" value="([^"]*)"/.exec(p)[1]), ['Coque', 'Capuchon']);
+  assert.deepEqual(plates.map((p) => (p.match(/<model_instance>/g) || []).length), [1, 1]);
+  // l'objet de chaque plateau est bien celui qui porte son nom
+  const objectName = (id) => new RegExp(`<object id="${id}">\\s*<metadata key="name" value="([^"]+)"`).exec(ms)[1];
+  const planned = plates.map((p) => objectName(/key="object_id" value="(\d+)"/.exec(p)[1]));
+  assert.deepEqual(planned, ['Coque', 'Capuchon']);
+  // sans option plates : un seul plateau avec les deux objets (compatibilité)
+  const legacy = strFromU8(unzipSync(build3mf({ title: 't', objects: lay.objects, filaments }))['Metadata/model_settings.config']);
+  assert.equal((legacy.match(/<plate>/g) || []).length, 1);
+  assert.equal((legacy.match(/<model_instance>/g) || []).length, 2);
 });
 
 test('STL binaire : taille et nombre de triangles', () => {

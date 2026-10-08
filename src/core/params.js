@@ -59,6 +59,7 @@ export const DEFAULTS = Object.freeze({
   // --- Impression --------------------------------------------------------
   bed: 180, // plateau carré (mm) : A1 mini = 180, A1/P1/X1 = 256
   layerHeight: 0.16, // mm, appliqué au 3MF (0,12 / 0,16 / 0,20 / 0,28)
+  plates: 2, // 2 = coque puis capuchon sur deux plateaux (moins de changements de filament) ; 1 = tout ensemble
 });
 
 /** Broches d'un switch MX vu de dessus (mm, par rapport au centre) : plot, ergots, pattes. */

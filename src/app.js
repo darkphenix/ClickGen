@@ -9,7 +9,7 @@ import { Runner } from './runner.js';
 import { Viewer } from './view/viewer.js';
 import { TopView } from './view/topview.js';
 import { assignFilaments } from './export/filaments.js';
-import { layoutForPrint, towerSize } from './export/layout.js';
+import { layoutForPrint } from './export/layout.js';
 import { build3mf } from './export/threemf.js';
 import { meshToStl } from './export/stl.js';
 import { bambuProjectSettings, loadBambuTemplate } from './export/bambuConfig.js';
@@ -31,7 +31,7 @@ const NOT_PERSISTED = ['placementAngle', 'placementX', 'placementY', 'bgColor'];
 const SHAPE_KEYS = ['size', 'frame', 'frameZoom', 'frameContent', 'smooth', 'minDetail', 'closeGap', 'keepMain', 'wall', 'clearance', 'autoGrow', 'maskMode', 'tolerance', 'invert', 'fillHoles'];
 // Seuls les réglages « machine » survivent d'une visite à l'autre : ajustements, imprimante, tailles.
 // La forme, le cadre, l'anneau… dépendent de l'image et repartent des valeurs par défaut.
-const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'artDepth', 'relief', 'size', 'autoGrow'];
+const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'plates', 'artDepth', 'relief', 'size', 'autoGrow'];
 
 /**
  * Navigation au clavier d'un groupe d'onglets ou de boutons radio : flèches, Début, Fin, avec « tabindex
@@ -533,7 +533,11 @@ function renderMessages() {
   const box = $('#messages');
   const extra = [];
   if (store.result) {
-    const n = assignedFilaments().filaments.length;
+    const { filaments, slots } = assignedFilaments();
+    // deux plateaux : seuls les filaments du capuchon sont chargés ensemble (la coque a son propre plateau)
+    const n = params.plates === 2 && filaments.length > 1
+      ? new Set([slots.cap, ...Object.values(slots.art)]).size
+      : filaments.length;
     if (n > 4) extra.push({ kind: 'warn', key: 'msg.manyFilaments', vars: { n } });
   }
   const items = [...store.msgs, ...extra, ...(store.toast ? [store.toast] : [])];
@@ -591,12 +595,14 @@ function setExportEnabled(on) {
   for (const id of ['#dl3mf', '#dlstl']) $(id).disabled = !on || store.exporting;
 }
 
-function printLayout(filaments, slots, withTower) {
+/** @param {{withTower:boolean, plates:1|2}} o */
+function printLayout(slots, { withTower, plates }) {
   return layoutForPrint(store.result.meshes, {
     slots,
     names: { shell: t('col.shell'), cap: t('col.base'), art: (i) => `decor_${i}` },
     bed: params.bed,
-    tower: withTower ? towerSize(filaments.length) : null,
+    plates,
+    tower: withTower ? undefined : null, // undefined : dimensionnée d'après les filaments de chaque plateau
   });
 }
 
@@ -605,18 +611,21 @@ async function export3mf() {
   store.exporting = true; setExportEnabled(false);
   try {
     const { filaments, slots } = assignedFilaments();
-    const lay = printLayout(filaments, slots, true);
+    // avec un seul filament, séparer les pièces n'économise rien : un plateau suffit
+    const plates = params.plates === 2 && filaments.length > 1 ? 2 : 1;
+    const lay = printLayout(slots, { withTower: true, plates });
     if (!lay.fits) flash('warn', 'msg.layout');
-    const cfg = bambuProjectSettings(await loadBambuTemplate(), filaments.map((f) => f.color), { tower: lay.tower, layerHeight: params.layerHeight });
+    const cfg = bambuProjectSettings(await loadBambuTemplate(), filaments.map((f) => f.color), { towers: lay.towers, layerHeight: params.layerHeight });
     const thumbnail = viewer ? await viewer.thumbnail(256) : undefined;
     const bytes = build3mf({
       title: `ClickGen ${store.image?.name ?? ''}`.trim(),
       objects: lay.objects, filaments, projectSettings: cfg, thumbnail,
+      plates: lay.plates, plateNames: lay.plates.map((idx) => idx.map((i) => lay.objects[i].name).join(' + ')),
       application: 'BambuStudio-02.06.01.55', // Bambu Studio n'applique la config projet que pour cette signature
     });
     const name = `${fileBase()}.3mf`;
     download(bytes, name, 'model/3mf');
-    if (lay.fits) flash('info', 'exp.done', { name });
+    if (lay.fits) flash('info', plates === 2 ? 'exp.twoPlates' : 'exp.done', { name });
   } catch (e) {
     console.error(e);
     store.msgs = [{ kind: 'error', key: 'msg.internal', vars: { message: e.message } }];
@@ -629,9 +638,10 @@ async function export3mf() {
 function exportStl() {
   if (!store.result || store.exporting) return;
   const { filaments, slots } = assignedFilaments();
-  const lay = printLayout(filaments, slots, false);
+  const lay = printLayout(slots, { withTower: false, plates: 1 });
   const files = {};
-  const notes = ['ClickGen : pièces en repère d\'impression.', '', 'Imprimer à plat, sans supports :'];
+  const raised = (store.result.relief ?? 0) > 0; // décor en relief : la face du capuchon flotte une fois retourné
+  const notes = ['ClickGen : pièces en repère d\'impression.', '', raised ? 'Imprimer à plat ; supports sur le capuchon (décor en relief) :' : 'Imprimer à plat, sans supports :'];
   for (const obj of lay.objects) {
     for (const part of obj.parts) {
       const fname = obj.name === t('col.shell') ? 'coque.stl' : part.name === 'cap_body' ? 'capuchon.stl' : `capuchon_${part.name}.stl`;
