@@ -52,9 +52,10 @@ export const DEFAULTS = Object.freeze({
   keyring: false, // anneau porte-clés
   keyringAngle: 90, // position de l'anneau sur le contour (degrés)
 
-  placementAngle: null, // angle imposé du switch (degrés) ; null = automatique
-  placementX: null, // position imposée du switch (mm, repère de la coque) ; null = automatique
-  placementY: null,
+  switchCount: 1, // 1 à 3 switches dans le même clicker (plusieurs : le capuchon bascule moins quand on appuie sur le côté)
+  placementAngle: null, // angle imposé des switches (degrés) ; null = automatique
+  placementX: null, // position imposée du premier switch (mm, repère de la coque) ; null = automatique
+  placementY: null, // (les autres suivent : le groupe se déplace d'un bloc)
 
   // --- Impression --------------------------------------------------------
   bed: 180, // plateau carré (mm) : A1 mini = 180, A1/P1/X1 = 256
@@ -87,6 +88,8 @@ export const MECH = Object.freeze({
   minCapWall: 1.2, // paroi mini du capuchon autour de son relief
   minCapFeature: 1.2, // plus petit détail du capuchon (mm)
   voidSize: 12.4, // cavité tolérante sous le switch (diamètre)
+  extraSocketPlay: 0.1, // jeu en plus sur la croix des switches 2 et 3 (la croix du premier tient le capuchon, les autres le guident)
+  maxSwitches: 3,
 });
 
 /**
@@ -122,6 +125,15 @@ export function derive(p) {
     shellH,
     pocket,
     capKeepOut: m.capPocketRim + 2 * m.minCapWall,
+    // écart minimal entre deux switches, selon les axes de leurs carrés : une paroi de 1,2 mm entre deux reliefs,
+    // et la bride (15,6 mm) d'un switch ne touche pas celle du voisin
+    switchPitch: Math.max(m.capPocketRim + m.minCapWall, s.flange + 0.4),
     capOffset: p.wall + p.clearance,
   };
+}
+
+/** Nombre de switches demandé, ramené à 1..3 (données non fiables : projet importé, NaN…). */
+export function switchCountOf(p) {
+  const n = Math.round(Number(p.switchCount));
+  return Number.isFinite(n) ? Math.min(MECH.maxSwitches, Math.max(1, n)) : 1;
 }

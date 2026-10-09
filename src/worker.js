@@ -2,7 +2,7 @@
 // Protocole :
 //   -> {type:'image', id, width, height, buffer}   définit l'image source (buffer RGBA transféré)
 //   -> {type:'run', id, params, force?}            (re)calcule ; seules les dernières demandes comptent ;
-//                                                  force : vide les caches (analyse, maillages) avant de calculer
+//                                                  force : vide les caches (analyse, maillages, arrangements des switches) avant de calculer
 //   -> {type:'coupon', id, params}                 banc d'essai de calibration
 //   <- {type:'result', id, analysis, result}       ou {type:'error', id, code, message, extra}
 //   <- {type:'coupon', id, mesh, info}
@@ -15,7 +15,7 @@ import { buildCoupon, couponToMesh } from './geometry/coupon.js';
 let img = null;
 let imgVersion = 0;
 let cache = { key: '', value: null };
-const buildCache = {}; // maillages de la coque et du capuchon déjà construits (voir pipeline.js)
+const buildCache = {}; // maillages de la coque et du capuchon déjà construits, arrangements des switches (voir pipeline.js)
 let pending = null;
 let running = false;
 
@@ -63,6 +63,7 @@ async function drain() {
       cache = { key: '', value: null };
       delete buildCache.shell;
       delete buildCache.cap;
+      delete buildCache.place;
     }
     const key = `${imgVersion}|${MASK_KEYS.map((k) => String(p[k])).join('|')}|${isFramed(p) ? 'frame' : 'outline'}`;
     // signes de vie : la page tue et relance le worker s'il reste muet trop longtemps (voir runner.js)

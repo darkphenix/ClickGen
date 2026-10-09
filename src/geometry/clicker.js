@@ -12,6 +12,12 @@ import { MECH, PIN_HOLES, SWITCH, derive } from '../core/params.js';
 import { SEG } from './outline.js';
 import { toMesh } from './engine.js';
 
+/** Une position (objet) ou plusieurs (tableau) : on travaille toujours sur une liste. */
+const asList = (placements) => (Array.isArray(placements) ? placements : [placements]);
+
+/** Union de sections 2D enregistrées dans le scope (la section elle-même s'il n'y en a qu'une). */
+const unionOf = (T, list) => list.reduce((a, b) => T(a.add(b)));
+
 /** Place des formes 2D dans le repère du switch (centre, rotation). */
 function switchFrame(wasm, T, placement) {
   const { CrossSection } = wasm;
@@ -26,29 +32,30 @@ function switchFrame(wasm, T, placement) {
  * @param {{Manifold:any,CrossSection:any}} wasm
  * @param {{add:(o:any)=>any}} scope
  * @param {any} S silhouette de la coque (CrossSection du scope)
- * @param {any} cap contour du capuchon, composante qui porte le switch (CrossSection du scope)
- * @param {{x:number,y:number,angle:number}} placement
+ * @param {any} cap contour du capuchon, composante qui porte les switches (CrossSection du scope)
+ * @param {{x:number,y:number,angle:number}|{x:number,y:number,angle:number}[]} placements un switch, ou une liste
+ *   (le premier est la référence : coupe, déplacement du groupe, croix à serrage normal)
  * @param {import('../core/params.js').DEFAULTS} p
  */
-export function buildShell(wasm, scope, S, cap, placement, p) {
+export function buildShell(wasm, scope, S, cap, placements, p) {
   const { Manifold, CrossSection } = wasm;
   const T = (x) => scope.add(x);
   const d = derive(p);
-  const { x: px, y: py } = placement;
-  const { onSwitch, square } = switchFrame(wasm, T, placement);
+  const list = asList(placements);
+  const frames = list.map((pl) => switchFrame(wasm, T, pl));
 
   const cavity = T(cap.offset(p.clearance, 'Round', 2, SEG));
-  const pocket = square(d.pocket);
+  const pocket = unionOf(T, frames.map((f) => f.square(d.pocket))); // un logement de 14 mm par switch
   const stray = T(pocket.subtract(cavity)).area();
   if (stray > 0.05) throw new Error(`Le logement du switch déborde de la cavité (${stray.toFixed(2)} mm²)`);
 
-  let pinCut;
-  if (p.pinStyle === 'holes') {
-    const holes = PIN_HOLES.map((h) => T(T(CrossSection.circle(h.d / 2, 32)).translate(h.x, h.y)));
-    pinCut = onSwitch(T(CrossSection.compose(holes)));
-  } else {
-    pinCut = T(T(CrossSection.circle(MECH.voidSize / 2, 64)).translate(px, py));
-  }
+  const pinCut = unionOf(T, list.map((pl, i) => {
+    if (p.pinStyle === 'holes') {
+      const holes = PIN_HOLES.map((h) => T(T(CrossSection.circle(h.d / 2, 32)).translate(h.x, h.y)));
+      return frames[i].onSwitch(T(CrossSection.compose(holes)));
+    }
+    return T(T(CrossSection.circle(MECH.voidSize / 2, 64)).translate(pl.x, pl.y));
+  }));
 
   const skin = MECH.floorSkin;
   const floorSlab = T(
@@ -78,43 +85,48 @@ export function buildShell(wasm, scope, S, cap, placement, p) {
  * @param {any} cap contour du capuchon (CrossSection du scope)
  * @param {{index:number, cs:any}[]} art régions de décor (CrossSection du scope), déjà disjointes
  */
-export function buildCap(wasm, scope, cap, placement, art, p) {
+export function buildCap(wasm, scope, cap, placements, art, p) {
   const { Manifold, CrossSection } = wasm;
   const T = (x) => scope.add(x);
   const d = derive(p);
-  const { x: px, y: py, angle } = placement;
-  const { onSwitch } = switchFrame(wasm, T, placement);
+  const list = asList(placements);
+  const frames = list.map((pl) => switchFrame(wasm, T, pl));
   const warnings = [];
+  const unionOf3d = (items) => (items.length > 1 ? T(Manifold.union(items)) : items[0]);
 
   // repère local : bord à z = 0, face décor à z = capH
   let body = extrudeChamfer(wasm, T, cap, d.capH, 0, p.chamfer);
 
+  // un relief (cavité pyramidale qui loge le « chapeau » du switch) par switch
   const rim = MECH.capPocketRim, ceil = MECH.capPocketCeil;
   const reliefProfile = T(CrossSection.square([rim, rim], true));
   // scaleTop doit être un couple [x, y] : un simple nombre n est lu comme (n, 0) et écraserait le sommet en Y (manifold 3.5)
   const reliefRaw = T(reliefProfile.extrude(d.reliefDepth + 0.04, 0, 0, [ceil / rim, ceil / rim]));
-  const relief = T(T(reliefRaw.rotate(0, 0, angle)).translate(px, py, -0.04));
-  body = T(body.subtract(relief));
+  body = T(body.subtract(unionOf3d(list.map((pl) => T(T(reliefRaw.rotate(0, 0, pl.angle)).translate(pl.x, pl.y, -0.04))))));
 
   // le fourreau descend du plafond du relief jusqu'à 1 mm du bord ; la croix y est creusée sur
   // `socketDepth`, son fond (= sommet de la tige au repos) est donc à pocketDepth, sous le plafond du relief
   const bossR = p.bossDiameter / 2;
   const bossH = d.reliefDepth + 0.3 - MECH.mouthRecess;
-  const boss = T(T(Manifold.cylinder(bossH, bossR, bossR, 64)).translate(px, py, MECH.mouthRecess));
-  body = T(body.add(boss));
+  body = T(body.add(unionOf3d(list.map((pl) => T(T(Manifold.cylinder(bossH, bossR, bossR, 64)).translate(pl.x, pl.y, MECH.mouthRecess))))));
 
-  const span = MECH.crossSpan + p.socketFit, arm = MECH.crossArm + p.socketFit;
-  const crossShape = (grow) => {
-    const a = T(CrossSection.square([span + 2 * grow, arm + 2 * grow], true));
-    const b = T(CrossSection.square([arm + 2 * grow, span + 2 * grow], true));
-    return onSwitch(T(a.add(b)));
-  };
+  // une croix par switch. La première tient le capuchon (serrage voulu) ; les suivantes ont un peu de jeu en plus :
+  // les tiges ne sont jamais exactement à l'écartement des croix, et ces croix-là ne font que guider le capuchon.
   const m0 = MECH.mouthRecess;
-  const socketParts = [
-    T(T(crossShape(0).extrude(MECH.socketDepth + 0.02)).translate(0, 0, m0 - 0.02)),
-    T(T(crossShape(0.25).extrude(0.14)).translate(0, 0, m0 - 0.02)), // entrée évasée
-    T(T(crossShape(0.12).extrude(0.12)).translate(0, 0, m0 + 0.12)),
-  ];
+  const socketParts = list.flatMap((_, i) => {
+    const play = i === 0 ? 0 : MECH.extraSocketPlay;
+    const span = MECH.crossSpan + p.socketFit + play, arm = MECH.crossArm + p.socketFit + play;
+    const crossShape = (grow) => {
+      const a = T(CrossSection.square([span + 2 * grow, arm + 2 * grow], true));
+      const b = T(CrossSection.square([arm + 2 * grow, span + 2 * grow], true));
+      return frames[i].onSwitch(T(a.add(b)));
+    };
+    return [
+      T(T(crossShape(0).extrude(MECH.socketDepth + 0.02)).translate(0, 0, m0 - 0.02)),
+      T(T(crossShape(0.25).extrude(0.14)).translate(0, 0, m0 - 0.02)), // entrée évasée
+      T(T(crossShape(0.12).extrude(0.12)).translate(0, 0, m0 + 0.12)),
+    ];
+  });
   body = T(body.subtract(T(Manifold.union(socketParts))));
 
   // décor : couches de couleur découpées dans la face du capuchon
@@ -138,9 +150,9 @@ export function buildCap(wasm, scope, cap, placement, art, p) {
 }
 
 /** Les deux pièces d'un coup (tests, usage simple). */
-export function buildClicker(wasm, scope, S, cap, placement, art, p) {
-  const s = buildShell(wasm, scope, S, cap, placement, p);
-  const c = buildCap(wasm, scope, cap, placement, art, p);
+export function buildClicker(wasm, scope, S, cap, placements, art, p) {
+  const s = buildShell(wasm, scope, S, cap, placements, p);
+  const c = buildCap(wasm, scope, cap, placements, art, p);
   return { shell: s.shell, capBody: c.capBody, arts: c.arts, dims: derive(p), warnings: c.warnings, keyring: s.keyring };
 }
 

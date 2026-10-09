@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PipelineError, analyzeImage, makeClicker } from '../src/pipeline.js';
-import { DEFAULTS, derive } from '../src/core/params.js';
+import { DEFAULTS, derive, switchCountOf } from '../src/core/params.js';
 import { bearImage, checkMesh, circle, fillPolygon, heart, newImage, solidIntervals, star } from './helpers.mjs';
 import { runGuarded } from './guarded.mjs';
 
@@ -153,4 +153,106 @@ test('position manuelle du switch : acceptée si elle tient, sinon retour à l\'
   assert.ok(!bad.manual);
   assert.ok(bad.warnings.some((w) => w.code === 'manualReset'));
   assert.ok(Math.hypot(bad.placement.x - auto.placement.x, bad.placement.y - auto.placement.y) < 3, 'retour à la position automatique');
+});
+
+// --- plusieurs switches dans le même clicker ---------------------------------------------------------------
+
+const disc = (r = 220) => shapeImage((i) => { fillPolygon(i, circle(250, 250, r), red); fillPolygon(i, circle(250, 250, r * 0.4), gold); });
+
+/** Écart « L-infini » de deux switches dans le repère tourné de l'arrangement. */
+const lInf = (a, b) => {
+  const t = (a.angle * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.max(Math.abs(dx * c + dy * s), Math.abs(-dx * s + dy * c));
+};
+
+test('plusieurs switches : un logement et une croix à chaque position, maillages étanches', async () => {
+  for (const n of [2, 3]) {
+    const { r, p } = await run(disc(), { size: 70, switchCount: n });
+    const d = derive(p);
+    assert.equal(r.switchCount, n);
+    assert.equal(r.placements.length, n);
+    assert.deepEqual(r.placement, r.placements[0], 'le switch de référence reste exposé');
+    assert.equal(new Set(r.placements.map((q) => q.angle)).size, 1, 'un seul angle pour tout le groupe');
+    for (const m of [r.meshes.shell, r.meshes.capBody, ...r.meshes.arts]) assert.ok(checkMesh(m.mesh).watertight, `${n} switches : maillage non étanche`);
+    for (const [i, q] of r.placements.entries()) {
+      // coque : au centre de chaque logement, seul le fond plein de 1,2 mm ; capuchon : le plafond de la croix
+      assert.deepEqual(solidIntervals(r.meshes.shell.mesh, q.x, q.y), [[0, 1.2]], `${n} switches, logement ${i}`);
+      const iv = solidIntervals(r.meshes.capBody.mesh, q.x, q.y);
+      assert.ok(near(iv[0][0], d.capRim + d.pocketDepth), `${n} switches, croix ${i} : plafond ${iv[0][0]}`);
+      for (const o of r.placements.slice(i + 1)) {
+        assert.ok(lInf(q, o) >= d.switchPitch - 1e-6, `écart ${lInf(q, o)} mm < ${d.switchPitch}`);
+        // entre deux logements : la collerette pleine jusqu'au plancher de la cavité
+        const mid = solidIntervals(r.meshes.shell.mesh, (q.x + o.x) / 2, (q.y + o.y) / 2);
+        assert.deepEqual(mid, [[0, d.cavityFloor]], `entre deux switches : ${JSON.stringify(mid)}`);
+      }
+    }
+  }
+});
+
+test('plusieurs switches : la forme grandit pour les loger, jamais en dessous du cas à un seul switch', async () => {
+  const size = {};
+  for (const n of [1, 2, 3]) {
+    const { r } = await run(disc(), { size: 40, switchCount: n });
+    size[n] = r.size;
+    assert.equal(r.placements.length, n);
+  }
+  assert.ok(size[1] <= size[2] + 1e-6 && size[2] <= size[3] + 1e-6, JSON.stringify(size));
+  assert.ok(size[3] > 50, `trois switches ne tiennent pas dans un disque de 40 mm (${size[3]})`);
+});
+
+test('plusieurs switches : trop serré sans agrandissement, le refus dit combien de switches', async () => {
+  const img = disc();
+  await assert.rejects(run(img, { size: 50, switchCount: 3, autoGrow: false }), (e) => e instanceof PipelineError && e.code === 'nofit' && e.switches === 3 && e.extra.switches === 3);
+  await assert.rejects(run(img, { size: 30, switchCount: 1, autoGrow: false }), (e) => e.code === 'nofit' && e.switches === 1);
+  // formes qui n'en logeront jamais trois à la taille maximale : refus, pas de boucle infinie
+  const thin = shapeImage((i) => fillPolygon(i, [[40, 235], [460, 235], [460, 265], [40, 265]], dark));
+  await assert.rejects(run(thin, { switchCount: 3 }), (e) => e instanceof PipelineError && ['nofit', 'vanished'].includes(e.code));
+});
+
+test('plusieurs switches : le groupe se déplace d\'un bloc, ou revient à l\'automatique', async () => {
+  const base = { ...DEFAULTS, size: 100, switchCount: 2 };
+  const a = analyzeImage(disc(), base);
+  const auto = await makeClicker(a, base);
+  const [a0, a1] = auto.placements;
+  const moved = await makeClicker(a, { ...base, placementX: a0.x + 3, placementY: a0.y + 2, placementAngle: a0.angle });
+  assert.ok(moved.manual, 'le groupe décalé tient dans le disque');
+  assert.ok(near(moved.placements[0].x, a0.x + 3, 1e-6) && near(moved.placements[0].y, a0.y + 2, 1e-6));
+  assert.ok(near(moved.placements[1].x - moved.placements[0].x, a1.x - a0.x, 1e-6), 'les écarts du groupe ne changent pas');
+  assert.ok(near(moved.placements[1].y - moved.placements[0].y, a1.y - a0.y, 1e-6));
+  for (const m of [moved.meshes.shell, moved.meshes.capBody]) assert.ok(checkMesh(m.mesh).watertight);
+  const far = await makeClicker(a, { ...base, placementX: a0.x + 80, placementY: a0.y, placementAngle: a0.angle });
+  assert.ok(!far.manual && far.warnings.some((w) => w.code === 'manualReset'));
+  assert.deepEqual(far.placements, auto.placements, 'retour à l\'arrangement automatique');
+});
+
+test('plusieurs switches : l\'arrangement est mis en mémoire, et reste identique sans mémoire', async () => {
+  const cache = {};
+  const base = { ...DEFAULTS, size: 70, switchCount: 3 };
+  const a = analyzeImage(disc(), base);
+  const r1 = await makeClicker(a, base, { cache });
+  assert.ok(cache.place instanceof Map && cache.place.size > 0, 'arrangements mémorisés');
+  const known = cache.place.size;
+  const r2 = await makeClicker(a, { ...base, socketFit: 0.1 }, { cache }); // même contour : rien à recalculer
+  assert.equal(cache.place.size, known, 'pas de nouvelle recherche pour un réglage sans rapport avec la forme');
+  assert.deepEqual(r2.placements, r1.placements);
+  const fresh = await makeClicker(a, base); // sans mémoire du tout
+  assert.deepEqual(fresh.placements, r1.placements, 'même résultat sans le mémo');
+  assert.equal(r2.meshes.shell, r1.meshes.shell, 'coque réutilisée');
+  // un autre nombre de switches ne réutilise pas la coque d'avant
+  const r4 = await makeClicker(a, { ...base, switchCount: 2 }, { cache });
+  assert.notEqual(r4.meshes.shell, r1.meshes.shell);
+  assert.equal(r4.placements.length, 2);
+});
+
+test('nombre de switches : borné à 1..3, toute valeur douteuse retombe sur 1', () => {
+  assert.equal(switchCountOf({ switchCount: 2 }), 2);
+  assert.equal(switchCountOf({ switchCount: 3 }), 3);
+  assert.equal(switchCountOf({ switchCount: 7 }), 3);
+  assert.equal(switchCountOf({ switchCount: 0 }), 1);
+  assert.equal(switchCountOf({ switchCount: -4 }), 1);
+  assert.equal(switchCountOf({ switchCount: 2.4 }), 2);
+  assert.equal(switchCountOf({ switchCount: '3' }), 3);
+  for (const bad of [NaN, undefined, null, 'x', Infinity, -Infinity]) assert.equal(switchCountOf({ switchCount: bad }), 1, String(bad));
+  assert.equal(switchCountOf({}), 1);
 });

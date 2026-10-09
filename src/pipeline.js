@@ -1,7 +1,7 @@
 // Orchestration : image -> silhouette -> placement du switch -> coque + capuchon.
 // Aucune dépendance au DOM : le même code tourne dans le navigateur et sous Node (tests).
 
-import { derive } from './core/params.js';
+import { derive, switchCountOf } from './core/params.js';
 import { blur } from './image/raster.js';
 import { segmentImage } from './image/segment.js';
 import { quantizeColors } from './image/quantize.js';
@@ -9,14 +9,15 @@ import { signedArea, simplifyLoop, traceContours } from './image/contours.js';
 import { Scope, getEngine, toMesh } from './geometry/engine.js';
 import { SEG, capOutline, componentAt, pxTransform, shellOutline, toMm } from './geometry/outline.js';
 import { convexHull, fitInside, frameOutline } from './geometry/frames.js';
-import { findPlacement } from './geometry/placement.js';
+import { findPlacement, findPlacements } from './geometry/placement.js';
 import { buildCap, buildShell } from './geometry/clicker.js';
 
 export class PipelineError extends Error {
   /**
    * @param {'empty'|'vanished'|'nofit'|'toobig'|'geometry'} code
    *   vanished : la forme existe mais disparaît après le nettoyage (plus fine que « Détail minimum »)
-   * @param {object} [extra] valeurs utiles à l'affichage du message (taille, détail minimum…)
+   *   nofit : aucun arrangement des switches ne tient (extra.switches = leur nombre, pour un message adapté)
+   * @param {object} [extra] valeurs utiles à l'affichage du message (taille, détail minimum, nombre de switches…)
    */
   constructor(code, message, extra = {}) {
     super(message);
@@ -120,6 +121,10 @@ export async function makeClicker(a, p, opts = {}) {
   const step = async (s) => opts.onStep && (await opts.onStep(s));
   const maxSize = Math.max(p.size, p.bed - 8);
   const sizeLimit = maxSize * 1.6;
+  const nSw = switchCountOf(p);
+  const manualWanted = p.placementX != null && p.placementY != null;
+  // arrondi des nombres dans les clés de cache (le bruit de calcul ne doit pas invalider un résultat)
+  const key = (o) => JSON.stringify(o, (_, v) => (typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v));
 
   // --- repères pixels -> mm et contour de départ ---------------------------------------------
   let tf, framePoly = null;
@@ -153,26 +158,75 @@ export async function makeClicker(a, p, opts = {}) {
     return shellOutline(wasm, sc, toMm(a.loops, tf, k), p);
   };
 
-  /** Essaie une échelle : silhouette, capuchon, position du switch. */
   const angles = Number.isFinite(p.placementAngle) ? [((p.placementAngle % 90) + 90) % 90] : undefined;
-  const tryFit = (k) => {
+
+  /** Le carré de sécurité d'un switch tient-il tout entier dans `shape` ? */
+  const squareFits = (sc, shape, q) => {
+    const side = d.capKeepOut;
+    const sq = sc.add(sc.add(sc.add(CrossSection.square([side, side], true)).rotate(q.angle)).translate(q.x, q.y));
+    return sc.add(sq.subtract(shape)).area() < 0.02;
+  };
+
+  // Arrangements automatiques déjà calculés : ils ne dépendent que du contour du capuchon, donc un curseur sans
+  // rapport avec la forme (couleurs, épaisseur du décor…) ou le glissement du groupe ne relance pas la recherche.
+  const memo = opts.cache ? (opts.cache.place ??= new Map()) : null;
+
+  /**
+   * Arrangement automatique de plusieurs switches, tous dans la même composante du capuchon (la plus grande
+   * qui les accueille). `quick` : on veut seulement savoir si ça tient. Renvoie la liste des positions, ou null.
+   */
+  const autoGroup = (sc, polys, capAll, quick) => {
+    const id = memo && key([polys, d.capKeepOut, d.switchPitch, nSw, angles ?? null, quick]);
+    if (memo?.has(id)) return memo.get(id);
+    let found = null;
+    const parts = capAll.decompose().map((c) => sc.add(c)).sort((a, b) => b.area() - a.area());
+    for (const part of parts) {
+      const r = findPlacements(part.toPolygons(), d.capKeepOut, nSw, { angles, pitch: d.switchPitch, fast: quick });
+      if (r) { found = r.placements; break; }
+    }
+    if (memo) {
+      if (memo.size >= 48) memo.delete(memo.keys().next().value); // le plus ancien
+      memo.set(id, found);
+    }
+    return found;
+  };
+
+  /**
+   * Où poser le ou les switches dans le capuchon `capAll` ? Renvoie { placements, manual } ; placements vaut
+   * null quand rien ne tient. La position choisie à la main n'est acceptée que si tout carré de sécurité tient
+   * dans le capuchon ; avec plusieurs switches elle déplace le groupe d'un bloc (le premier prend la position
+   * demandée, les autres gardent leurs écarts avec lui).
+   */
+  const placeIn = (sc, capAll, quick) => {
+    const polys = capAll.toPolygons();
+    if (nSw === 1) {
+      let placement = null, manual = false;
+      if (manualWanted) {
+        const q = { x: p.placementX, y: p.placementY, angle: p.placementAngle ?? 0, clearance: 0 };
+        if (squareFits(sc, capAll, q)) { placement = q; manual = true; }
+      }
+      if (!placement) placement = polys.length ? findPlacement(polys, d.capKeepOut, { angles }) : null;
+      return { placements: placement ? [placement] : null, manual };
+    }
+    const auto = autoGroup(sc, polys, capAll, quick);
+    if (!auto) return { placements: null, manual: false };
+    if (manualWanted) {
+      const dx = p.placementX - auto[0].x, dy = p.placementY - auto[0].y;
+      const moved = auto.map((q) => ({ ...q, x: q.x + dx, y: q.y + dy, clearance: 0 }));
+      const home = componentAt(wasm, sc, capAll, moved[0].x, moved[0].y);
+      if (moved.every((q) => squareFits(sc, home, q))) return { placements: moved, manual: true };
+    }
+    return { placements: auto, manual: false };
+  };
+
+  /** Essaie une échelle : silhouette, capuchon, position des switches. */
+  const tryFit = (k, quick = false) => {
     const sc = new Scope();
     try {
       const so = outlineAt(sc, k);
       const capAll = capOutline(wasm, sc, so.cs, d);
-      const polys = capAll.toPolygons();
-      // position choisie à la main : acceptée seulement si tout le carré de sécurité tient dans le capuchon
-      let placement = null, manual = false;
-      if (p.placementX != null && p.placementY != null) {
-        const side = d.capKeepOut;
-        const sq = sc.add(sc.add(sc.add(CrossSection.square([side, side], true)).rotate(p.placementAngle ?? 0)).translate(p.placementX, p.placementY));
-        if (sc.add(sq.subtract(capAll)).area() < 0.02) {
-          placement = { x: p.placementX, y: p.placementY, angle: p.placementAngle ?? 0, clearance: 0 };
-          manual = true;
-        }
-      }
-      if (!placement) placement = polys.length ? findPlacement(polys, d.capKeepOut, { angles }) : null;
-      return { sc, S: so.cs, dropped: so.dropped, capAll, placement, manual, k };
+      const { placements, manual } = placeIn(sc, capAll, quick);
+      return { sc, S: so.cs, dropped: so.dropped, capAll, placements, manual, quick, k };
     } catch (e) {
       sc.dispose();
       throw e;
@@ -204,11 +258,15 @@ export async function makeClicker(a, p, opts = {}) {
 
     // --- agrandissement automatique : on cherche l'échelle minimale où le switch rentre --------
     // (progression géométrique jusqu'à trouver, puis dichotomie : ~8 essais au lieu de 24)
-    let best = tryFit(k0);
+    // Avec plusieurs switches chaque essai ne cherche qu'un arrangement qui tienne (mode rapide) ; le meilleur
+    // arrangement n'est choisi qu'une fois, à l'échelle retenue.
+    const quickProbes = nSw > 1;
+    const nofit = (text, size) => new PipelineError('nofit', text, { size, switches: nSw });
+    let best = tryFit(k0, quickProbes);
     try {
-      if (!best.placement) {
+      if (!best.placements) {
         if (!p.autoGrow) {
-          throw new PipelineError('nofit', 'Le switch ne rentre pas dans cette forme à cette taille.', { size: sizeOf(k0) });
+          throw nofit(nSw > 1 ? 'Les switches ne rentrent pas dans cette forme à cette taille.' : 'Le switch ne rentre pas dans cette forme à cette taille.', sizeOf(k0));
         }
         let lo = k0, hi = k0;
         best.sc.dispose();
@@ -218,27 +276,31 @@ export async function makeClicker(a, p, opts = {}) {
           hi *= 1.25;
           const size = sizeOf(hi);
           if (!(size <= sizeLimit) || n >= 40) {
-            throw new PipelineError('nofit', 'La forme est trop fine pour loger un switch.', { size: Number.isFinite(size) ? size : sizeLimit });
+            throw nofit(nSw > 1 ? 'La forme est trop fine pour loger ces switches.' : 'La forme est trop fine pour loger un switch.', Number.isFinite(size) ? size : sizeLimit);
           }
           await step('fit');
-          const t = tryFit(hi);
-          if (t.placement) best = t; else { t.sc.dispose(); lo = hi; }
+          const t = tryFit(hi, quickProbes);
+          if (t.placements) best = t; else { t.sc.dispose(); lo = hi; }
         }
         for (let i = 0; i < 5 && (hi - lo) / lo > 0.02; i++) {
           const mid = (lo + hi) / 2;
           await step('fit');
-          const t = tryFit(mid);
-          if (t.placement) { best.sc.dispose(); best = t; hi = mid; } else { t.sc.dispose(); lo = mid; }
+          const t = tryFit(mid, quickProbes);
+          if (t.placements) { best.sc.dispose(); best = t; hi = mid; } else { t.sc.dispose(); lo = mid; }
         }
+      }
+      if (best.quick) { // arrangement définitif : le mode rapide l'a trouvé possible, le mode complet cherche le meilleur
+        const full = placeIn(best.sc, best.capAll, false);
+        if (full.placements) Object.assign(best, full, { quick: false });
       }
     } catch (e) {
       best?.sc.dispose(); // un essai qui lève ne doit pas laisser fuir la mémoire WASM du meilleur ajustement
       throw e;
     }
     scope = best.sc;
-    const { S, dropped, placement } = best;
+    const { S, dropped, placements } = best;
+    const placement = placements[0]; // le switch de référence (le plus proche du centre de gravité)
     const k = best.k;
-    const manualWanted = p.placementX != null && p.placementY != null;
     const cap = componentAt(wasm, scope, best.capAll, placement.x, placement.y);
     const finalSize = sizeOf(k);
     const grown = k / k0 > 1.001;
@@ -279,15 +341,15 @@ export async function makeClicker(a, p, opts = {}) {
     // ne reconstruit pas l'autre.
     await step('solid');
     const cache = opts.cache ?? null;
-    const key = (o) => JSON.stringify(o, (_, v) => (typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v));
     const capPolys = cap.toPolygons();
+    const pl = placements.map((q) => [q.x, q.y, q.angle]);
     const shellKey = key({
-      S: S.toPolygons(), cap: capPolys, pl: [placement.x, placement.y, placement.angle], d,
+      S: S.toPolygons(), cap: capPolys, pl, d,
       wall: p.wall, clearance: p.clearance, pocketFit: p.pocketFit, pinStyle: p.pinStyle, chamfer: p.chamfer,
       keyring: p.keyring, keyringAngle: p.keyringAngle,
     });
     const capKey = key({
-      cap: capPolys, art: art.map((x) => [x.index, x.cs.toPolygons()]), pl: [placement.x, placement.y, placement.angle],
+      cap: capPolys, art: art.map((x) => [x.index, x.cs.toPolygons()]), pl,
       dims: [d.capH, d.reliefDepth, d.pocketDepth, d.capRim], // seules les cotes que le capuchon utilise
       bossDiameter: p.bossDiameter, socketFit: p.socketFit, chamfer: p.chamfer, artDepth: p.artDepth, relief: p.relief,
     });
@@ -296,7 +358,7 @@ export async function makeClicker(a, p, opts = {}) {
     let shellOut = cache?.shell?.key === shellKey ? cache.shell.value : null;
     if (!shellOut) {
       shellOut = guard(() => {
-        const r = buildShell(wasm, scope, S, cap, placement, { ...p });
+        const r = buildShell(wasm, scope, S, cap, placements, { ...p });
         return { shell: { mesh: toMesh(r.shell), volume: r.shell.volume() }, keyring: r.keyring };
       });
       if (cache) cache.shell = { key: shellKey, value: shellOut };
@@ -304,7 +366,7 @@ export async function makeClicker(a, p, opts = {}) {
     let capOut = cache?.cap?.key === capKey ? cache.cap.value : null;
     if (!capOut) {
       capOut = guard(() => {
-        const r = buildCap(wasm, scope, cap, placement, art, { ...p });
+        const r = buildCap(wasm, scope, cap, placements, art, { ...p });
         return {
           capBody: { mesh: toMesh(r.capBody), volume: r.capBody.volume() },
           arts: r.arts.map((x) => ({ index: x.index, mesh: toMesh(x.manifold), volume: x.manifold.volume() })),
@@ -332,6 +394,8 @@ export async function makeClicker(a, p, opts = {}) {
       used,
       preview,
       placement,
+      placements,
+      switchCount: placements.length,
       dims: d,
       size: finalSize,
       grown,

@@ -20,10 +20,10 @@ function manifoldOf(sc, mesh) {
 }
 
 /** Switch MX simplifié, repère assemblé : pièce fixe (boîtier, bride, chapeau à fenêtre) + tige mobile. */
-function buildSwitch(sc) {
+function buildSwitch(sc, placement = result.placement) {
   const { Manifold } = wasm;
   const T = (x) => sc.add(x);
-  const { x, y, angle } = result.placement;
+  const { x, y, angle } = placement;
   const place = (m, z = 0, dz = 0) => T(T(T(m.rotate(0, 0, angle)).translate(x, y, d.seat + z + dz)));
   const box = (w, h, z0, z1) => T(T(Manifold.cube([w, h, z1 - z0], true)).translate(0, 0, (z0 + z1) / 2));
   const lower = box(13.8, 13.8, 0, SWITCH.seatToFlange);
@@ -97,5 +97,38 @@ test('le relief du capuchon (14,8 mm) garde au moins 1,1 mm de paroi, sur des fo
     }
   } finally {
     sc.dispose();
+  }
+});
+
+test('interférences avec 2 et 3 switches : rien ne se traverse, les switches ne se touchent pas', async () => {
+  for (const n of [2, 3]) {
+    const pn = { ...DEFAULTS, switchCount: n };
+    const r = await makeClicker(analyzeImage(bearImage(500, true), pn), pn);
+    assert.equal(r.placements.length, n);
+    const sc = new Scope();
+    try {
+      const shell = manifoldOf(sc, r.meshes.shell.mesh);
+      const cap = sc.add(wasm.Manifold.union([r.meshes.capBody.mesh, ...r.meshes.arts.map((a) => a.mesh)].map((m) => manifoldOf(sc, m))));
+      const switches = r.placements.map((pl) => buildSwitch(sc, pl));
+
+      // les boîtiers voisins ne se gênent pas (bride de 15,6 mm, pas de 16 mm) et tiennent dans la coque
+      for (const [i, a] of switches.entries()) {
+        assert.ok(vol(sc, shell, a.fixed) < 0.5, `${n} switches : coque x boîtier ${i} : ${vol(sc, shell, a.fixed)} mm³`);
+        for (const [j, b] of switches.entries()) if (j > i) assert.ok(vol(sc, a.fixed, b.fixed) < 1e-6, `${n} switches : boîtiers ${i} et ${j} se touchent`);
+      }
+      for (const t of [0, 1, 2, 3, 3.6, 3.8, SWITCH.travel]) {
+        const capT = sc.add(cap.translate(0, 0, -t));
+        assert.ok(vol(sc, capT, shell) < 0.5, `${n} switches : capuchon x coque à ${t} mm`);
+        for (const [i, sw] of switches.entries()) {
+          assert.ok(vol(sc, capT, sw.fixed) < 0.5, `${n} switches : capuchon x boîtier ${i} à ${t} mm : ${vol(sc, capT, sw.fixed)} mm³`);
+          const fit = vol(sc, capT, sc.add(sw.stem.translate(0, 0, -t)));
+          assert.ok(fit >= 0 && fit < 8, `${n} switches : serrage de la croix ${i} à ${t} mm : ${fit} mm³`);
+          // la croix du premier switch tient le capuchon ; les autres ont 0,1 mm de jeu en plus et ne font que le guider
+          if (i === 0) assert.ok(fit > 0.1, `${n} switches : le premier switch doit tenir le capuchon (${fit} mm³ à ${t} mm)`);
+        }
+      }
+    } finally {
+      sc.dispose();
+    }
   }
 });
