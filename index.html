@@ -139,6 +139,15 @@
               <label for="size"><span data-i18n="shape.size">Taille de la coque</span><output data-for="size" data-unit="mm"></output></label>
               <input type="range" id="size" data-param="size" min="30" max="150" step="1">
             </div>
+            <div class="field">
+              <label><span data-i18n="shape.switches">Switches dans le clicker</span><output data-for="switchCount"></output></label>
+              <div class="seg" role="radiogroup" id="switchCount" data-i18n-attr="aria-label:shape.switches" aria-label="Switches dans le clicker">
+                <button type="button" role="radio" data-val="1">1</button>
+                <button type="button" role="radio" data-val="2">2</button>
+                <button type="button" role="radio" data-val="3">3</button>
+              </div>
+              <p class="note" data-i18n="shape.switchesHint"></p>
+            </div>
             <div class="toggles">
               <label class="toggle"><input type="checkbox" data-param="autoGrow"><i></i><span data-i18n="shape.autoGrow">Agrandir si le switch ne rentre pas</span></label>
               <label class="toggle"><input type="checkbox" data-param="keyring"><i></i><span data-i18n="ring.on">Anneau porte-clés</span></label>
@@ -273,7 +282,7 @@
             <ol class="steps">
               <li data-i18n="help.1">Téléchargez le .3mf et ouvrez-le dans Bambu Studio : la coque (plateau 1) et le capuchon retourné (plateau 2), un filament par couleur. Imprimez les deux plateaux.</li>
               <li data-i18n="help.2">Imprimez sans supports, en PLA, buse 0,4 mm, couches de 0,16 à 0,20 mm.</li>
-              <li data-i18n="help.3">Enfoncez le switch par le haut dans le logement (broches vers le bas), puis poussez le capuchon sur la tige jusqu'à ce qu'il soit bien assis.</li>
+              <li data-i18n="help.3">Enfoncez chaque switch par le haut dans son logement (broches vers le bas), puis poussez le capuchon sur les tiges jusqu'à ce qu'il soit bien assis.</li>
               <li data-i18n="help.4">Trop serré ou trop lâche ? Imprimez le banc d'essai (section Ajustements) et reportez le meilleur réglage.</li>
               <li data-i18n="help.5">Il vous faut un switch mécanique compatible MX (Cherry, Gateron, Kailh…). Un modèle « clicky » (bleu) donne le vrai clic.</li>
             </ol>
@@ -327,7 +336,7 @@
         </div>
       </div>
       <div class="stage-bottom" id="barTop" hidden>
-        <span class="mini drag-hint" data-i18n="view.topDrag">Faites glisser le carré bleu pour déplacer le switch.</span>
+        <span class="mini drag-hint" id="dragHint" data-i18n="view.topDrag">Faites glisser le carré bleu pour déplacer le switch.</span>
         <label class="mini slider-inline"><span data-i18n="view.topAngle">Angle du switch</span>
           <input type="range" id="angle" min="0" max="90" step="1" value="0"><output id="angleOut"></output></label>
         <button type="button" class="chip" id="angleAuto" data-i18n="view.topAuto">Auto</button>

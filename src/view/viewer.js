@@ -44,6 +44,7 @@ export class Viewer {
     this.explode = 0;
     this.spring = { x: 0, v: 0, target: 0 };
     this.meta = null;
+    this.stems = []; // tiges des switches (une par switch), enfoncées avec le capuchon
     this.dirty = true;
     this.framed = false;
     this.w = 1;
@@ -212,7 +213,8 @@ export class Viewer {
     this.capGroup.add(this._mesh(capBody.mesh, this.mats.base, true));
     for (const a of arts) this.capGroup.add(this._mesh(a.mesh, this._artMat(a.index), true));
     this.root.add(this.shellMesh, this.capGroup);
-    this._buildSwitch(result.placement, result.dims);
+    const placements = result.placements ?? [result.placement];
+    this._buildSwitches(placements, result.dims);
     this.root.updateMatrixWorld(true);
     this.shellBox = new THREE.Box3().setFromObject(this.shellMesh);
     this.capBox = new THREE.Box3().setFromObject(this.capGroup);
@@ -220,9 +222,10 @@ export class Viewer {
       dims: result.dims,
       bounds: meshBounds(shell.mesh),
       placement: result.placement,
+      placements,
       outline: result.outline,
     };
-    this.clipPlane.constant = -result.placement.y;
+    this.clipPlane.constant = -result.placement.y; // la coupe passe par le switch de référence
     this._applyCut();
     this._applyPrintLayout();
     if (!this.framed) this.frame();
@@ -251,12 +254,22 @@ export class Viewer {
       this.root.remove(o);
       o.traverse((n) => n.geometry?.dispose());
     }
-    this.shellMesh = this.capGroup = this.switchGroup = this.stem = null;
+    this.shellMesh = this.capGroup = this.switchGroup = null;
+    this.stems = [];
+  }
+
+  /** Les switches MX (un à trois) : un groupe parent, une tige par switch, toutes enfoncées ensemble. */
+  _buildSwitches(placements, d) {
+    this.switchGroup = new THREE.Group();
+    this.stems = [];
+    for (const q of placements) this.switchGroup.add(this._switchModel(q, d));
+    this.switchGroup.visible = !this.printLayout && (this._switchVisible ?? false);
+    this.root.add(this.switchGroup);
   }
 
   /** Switch MX simplifié (boîtier, bride, chapeau, croix) pour visualiser ce qui se passe dedans. */
-  _buildSwitch(placement, d) {
-    const g = (this.switchGroup = new THREE.Group());
+  _switchModel(placement, d) {
+    const g = new THREE.Group();
     g.position.set(placement.x, placement.y, d.seat);
     g.rotation.z = (placement.angle * Math.PI) / 180;
     const m = this.mats.switch;
@@ -276,12 +289,12 @@ export class Viewer {
     hatMesh.position.z = SWITCH.seatToFlange + 1.0 + hatH / 2;
     hatMesh.castShadow = true;
     g.add(hatMesh);
-    const stem = (this.stem = new THREE.Group());
+    const stem = new THREE.Group();
     stem.add(box(4.0, 1.2, SWITCH.stemAbove, SWITCH.housingTop + SWITCH.stemAbove / 2));
     stem.add(box(1.2, 4.0, SWITCH.stemAbove, SWITCH.housingTop + SWITCH.stemAbove / 2));
     g.add(stem);
-    g.visible = !this.printLayout && (this._switchVisible ?? false);
-    this.root.add(g);
+    this.stems.push(stem);
+    return g;
   }
 
   /** Couleurs : {shell, base, art:{index: '#rrggbb'}} — pas besoin de recalculer la géométrie. */
@@ -391,7 +404,7 @@ export class Viewer {
 
   _apply() {
     if (this.capGroup && !this.printLayout) this.capGroup.position.set(0, 0, -this.spring.x + this.explode * EXPLODE_MM);
-    if (this.stem) this.stem.position.z = this.printLayout ? 0 : -this.spring.x;
+    for (const stem of this.stems) stem.position.z = this.printLayout ? 0 : -this.spring.x;
   }
 
   // -------------------------------------------------------------------- cotes --

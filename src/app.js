@@ -31,7 +31,9 @@ const NOT_PERSISTED = ['placementAngle', 'placementX', 'placementY', 'bgColor'];
 const SHAPE_KEYS = ['size', 'frame', 'frameZoom', 'frameContent', 'smooth', 'minDetail', 'closeGap', 'keepMain', 'wall', 'clearance', 'autoGrow', 'maskMode', 'tolerance', 'invert', 'fillHoles'];
 // Seuls les réglages « machine » survivent d'une visite à l'autre : ajustements, imprimante, tailles.
 // La forme, le cadre, l'anneau… dépendent de l'image et repartent des valeurs par défaut.
-const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'plates', 'artDepth', 'relief', 'size', 'autoGrow'];
+const PERSISTED = ['pocketFit', 'socketFit', 'clearance', 'wall', 'bossDiameter', 'chamfer', 'pinStyle', 'bed', 'layerHeight', 'plates', 'artDepth', 'relief', 'size', 'autoGrow', 'switchCount'];
+// contrôles à boutons (pas de curseur, donc pas de min/max dans la page) : bornes et arrondi explicites
+const COUNT_LIMITS = { colorCount: [1, 5], switchCount: [1, 3] };
 
 /**
  * Navigation au clavier d'un groupe d'onglets ou de boutons radio : flèches, Début, Fin, avec « tabindex
@@ -96,7 +98,8 @@ function sanitizeParams(src) {
     const el = document.querySelector(`[data-param="${k}"]`);
     if (typeof v === 'number') {
       if (!Number.isFinite(v)) continue;
-      if (el?.tagName === 'SELECT') { if (![...el.options].some((o) => Number(o.value) === v)) continue; }
+      if (COUNT_LIMITS[k]) { const [lo, hi] = COUNT_LIMITS[k]; v = Math.min(hi, Math.max(lo, Math.round(v))); }
+      else if (el?.tagName === 'SELECT') { if (![...el.options].some((o) => Number(o.value) === v)) continue; }
       else if (el && el.min !== '' && el.max !== '') v = Math.min(parseFloat(el.max), Math.max(parseFloat(el.min), v));
     } else if (typeof v === 'string' && el?.tagName === 'SELECT' && ![...el.options].some((o) => o.value === v)) continue;
     out[k] = v;
@@ -151,7 +154,9 @@ function syncEl(el) {
 
 function syncAll() {
   $$('[data-param]').forEach(syncEl);
-  $$('button', $('#colorCount')).forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.val) === params.colorCount)));
+  for (const id of ['colorCount', 'switchCount']) {
+    $$('button', $(`#${id}`)).forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.val) === params[id])));
+  }
   updateOutputs();
   syncVisibility();
 }
@@ -199,6 +204,14 @@ function bindParams() {
     syncAll(); saveParams(); requestRun();
   });
   bindRovingGroup($('#colorCount'), 'aria-checked', (b) => b.click());
+  $('#switchCount').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-val]');
+    if (!b) return;
+    params.switchCount = Number(b.dataset.val);
+    params.placementX = params.placementY = params.placementAngle = null; // un autre nombre de switches : autre arrangement
+    syncAll(); saveParams(); requestRun();
+  });
+  bindRovingGroup($('#switchCount'), 'aria-checked', (b) => b.click());
   $('#resetFit').addEventListener('click', () => {
     for (const k of FIT_KEYS) params[k] = DEFAULTS[k];
     syncAll(); saveParams(); requestRun(0);
@@ -468,10 +481,11 @@ function onError(e) {
   store.regenToast = false;
   // un refus normal (forme introuvable, trop fine, ne tient pas) n'est pas un bogue : pas de trace rouge
   (['empty', 'vanished', 'nofit'].includes(e.code) ? console.info : console.error)(e.workerStack || e);
-  const key = { empty: 'msg.empty', vanished: 'msg.vanished', nofit: 'msg.nofit', geometry: 'msg.geometry', timeout: 'msg.timeout' }[e.code] ?? 'msg.internal';
   const x = e.extra ?? {};
+  const key = { empty: 'msg.empty', vanished: 'msg.vanished', nofit: x.switches > 1 ? 'msg.nofitMulti' : 'msg.nofit', geometry: 'msg.geometry', timeout: 'msg.timeout' }[e.code] ?? 'msg.internal';
   store.msgs = [{ kind: 'error', key, vars: {
     size: x.size ? fmt(x.size) : '',
+    n: x.switches ?? 1,
     minDetail: Number.isFinite(x.minDetail) ? fmt(x.minDetail) : '',
     message: e.message,
   } }];
@@ -487,10 +501,13 @@ function onResult(msg) {
   const colors = currentColors();
   viewer?.setModel(r);
   viewer?.setColors(colors);
-  topview.setData({ preview: r.preview, placement: r.placement, outline: r.outline, colors, keyring: r.keyring, keepOut: r.dims.capKeepOut });
+  topview.setData({ preview: r.preview, placement: r.placement, placements: r.placements, outline: r.outline, colors, keyring: r.keyring, keepOut: r.dims.capKeepOut });
+  const hint = $('#dragHint');
+  hint.dataset.i18n = r.switchCount > 1 ? 'view.topDragMulti' : 'view.topDrag';
+  hint.textContent = t(hint.dataset.i18n);
   store.msgs = r.warnings.flatMap((w) => {
     if (w.code === 'grown') {
-      const out = [{ kind: 'info', key: 'msg.grown', vars: { size: fmt(w.size) } }];
+      const out = [{ kind: 'info', key: r.switchCount > 1 ? 'msg.grownMulti' : 'msg.grown', vars: { size: fmt(w.size) } }];
       // forme très fine : le switch n'entre qu'à une taille démesurée, un cadre est la bonne réponse
       if (w.size > params.size * 1.3 && params.frame === 'image') out.push({ kind: 'info', key: 'msg.growTip' });
       return out;
@@ -579,7 +596,9 @@ function renderStats() {
     [t('stat.shell'), `${fmt(r.outline.w)} × ${fmt(r.outline.h)} × ${fmt(d.shellH)} mm`],
     [t('stat.cap'), `${fmt(d.capH)} mm`],
     [t('stat.height'), `${fmt(d.capTopRest + (r.relief ?? 0))} mm ${t('stat.rest')}, ${fmt(d.shellH)} ${t('stat.pressed')}`],
-    [t('stat.switch'), `MX 14,0 mm, ${fmt(r.placement.angle, 0)}°`],
+    r.switchCount > 1
+      ? [t('stat.switches'), `${r.switchCount} × MX 14,0 mm, ${fmt(r.placement.angle, 0)}°`]
+      : [t('stat.switch'), `MX 14,0 mm, ${fmt(r.placement.angle, 0)}°`],
     [t('stat.filaments'), String(assignedFilaments().filaments.length)],
     [t('stat.mass'), t('stat.massValue', { g: fmt(grams, 0) })],
   ];
@@ -755,7 +774,8 @@ async function openProject(file) {
   try {
     const proj = JSON.parse(await file.text());
     if (proj?.app !== 'ClickGen' || typeof proj.params !== 'object') throw new Error('format inconnu');
-    Object.assign(params, sanitizeParams(proj.params), { placementAngle: null, bgColor: null });
+    // un projet enregistré avant les switches multiples n'a pas ce réglage : il compte un seul switch, pas celui de la séance
+    Object.assign(params, { switchCount: DEFAULTS.switchCount }, sanitizeParams(proj.params), { placementAngle: null, bgColor: null });
     const hex = (v) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : null);
     store.shellColor = hex(proj.shellColor) ?? SHELL_DARK;
     store.shellAuto = proj.shellAuto !== false;

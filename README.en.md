@@ -24,9 +24,10 @@ Everything runs in your browser: your images never leave your computer and no ne
 - **Image to clicker**: the image outline becomes the shell shape, its colors become the cap's decor.
 - **Frames**: circle, rounded square, hexagon, octagon, shield, pill… The image (a photo, a complicated logo) becomes the decor of a clean shape, fitted so nothing overflows.
 - **Text and emojis**: type a name (up to three lines, six fonts), pick a frame and colors.
+- **Several switches**: 2 or 3 switches in the same clicker (the “Switches in the clicker” setting): the cap, held at several points, rocks less when you press on one side. The group places itself (same angle, at least 16 mm apart) and moves as one block in the top view.
 - **Key ring**: a flat drilled lug at the position you want on the outline.
 - **Test coupon**: a small plate printed in 25 minutes (4 pockets, 4 crosses) to dial in the fit *before* a big clicker.
-- **Live preview**: press the cap (click, Space or button) with the sound of a clicky, tactile or linear switch; exploded view, cutaway, visible switch, dimensions, top view, **plate view** (the flipped cap as it prints, no supports).
+- **Live preview**: press the cap (click, Space or button) with the sound of a clicky, tactile or linear switch; exploded view, cutaway, visible switch, dimensions, top view, **plate view** (the flipped cap as it prints, no supports). The **Regenerate** button redoes the whole computation without reusing anything cached.
 - **Projects**: save and reopen a project (`.clickgen.json`) with the image, colors and all settings.
 - **Export**: multicolor `.3mf` (Bambu Studio / OrcaSlicer, selectable layer height) or a zip of STL files. By default the `.3mf` holds **two plates** (the shell, then the cap): far fewer filament changes (see below).
 
@@ -34,15 +35,15 @@ Everything runs in your browser: your images never leave your computer and no ne
 
 1. **Cut-out**: image transparency, or background color (sampled on the borders, or picked with the eyedropper; adjustable tolerance). The outline is traced at sub-pixel precision, smoothed, then cleaned in millimeters (narrow gaps closed, details thinner than the nozzle removed).
 2. **Two parts**: the **shell** follows the silhouette (or the frame); the **cap** is that shape shrunk by the wall (2 mm) and the clearance (0.6 mm). It slides inside the shell.
-3. **Switch placement**: ClickGen searches the cap for the position and angle where the switch square (14.8 mm relief + walls) fits entirely, as close as possible to the center of mass. Shapes that are too small are enlarged to the minimum needed (can be disabled).
+3. **Switch placement**: ClickGen searches the cap for the position and angle where the switch square (14.8 mm relief + walls) fits entirely, as close as possible to the center of mass. With 2 or 3 switches it looks for an arrangement (same angle, at least 16 mm between squares) that spreads them apart and balances them around the center of mass. Shapes that are too small are enlarged to the minimum needed (can be disabled).
 4. **Colors**: the image is reduced to 1–5 colors (k-means in Lab, final color = median of the pixels). With a cut-out subject, the background is the cap color and each subject color becomes a decor layer, printed against the bed.
 5. **Export**: a `.3mf` with the shell upright (plate 1) and the **flipped cap**, decor-side down (plate 2), one filament per distinct color and a purge tower where colors change; or a zip of STL files. A single plate is still available.
 
 ## Print and assemble
 
 1. Open the `.3mf` in Bambu Studio or OrcaSlicer, check the filaments, print plate 1 (shell) then plate 2 (cap).
-2. Press the switch into the shell's pocket from above (pins into the cavity): it is held by friction.
-3. Push the cap onto the switch's cross stem. It must be able to travel 4 mm; the shell wraps it almost down to the bottom.
+2. Press each switch into its pocket in the shell from above (pins into the cavity): it is held by friction.
+3. Push the cap onto the switches' cross stems. It must be able to travel 4 mm; the shell wraps it almost down to the bottom. With several switches, hold the cap flat before pushing: all the stems must enter together.
 
 ### Time and PLA: one plate or two?
 
@@ -72,7 +73,7 @@ Adjust in steps of 0.05 to 0.1 mm after a first test print.
 ## Development
 
 ```bash
-npm test          # 51 tests: image, placement, mechanical dimensions, interference over the full travel, frames, 3MF, STL, worker guard rails
+npm test          # 70 tests: image, placement (1 to 3 switches), mechanical dimensions, interference over the full travel, frames, 3MF, STL, worker guard rails
 npm run serve     # dev server on port 5173
 ```
 
@@ -85,6 +86,7 @@ npm run serve     # dev server on port 5173
 - The outline of a very detailed image or photo is complicated: pick a **frame** instead (the image stays as the decor), or use a logo, a mascot or flat art on a transparent or plain background.
 - Beyond 4 filaments loaded at once an AMS lite is not enough: reduce the color count or give two parts the same color. On two plates only the cap counts (4 colors at most, the shell is loaded separately); on one plate the shell counts too.
 - Only one piece is kept (the largest); detached islands are ignored.
+- **Several switches**: their springs add up (it takes two or three times the force). One *clicky* switch is enough for the click, the others can be linear. Only the first switch's cross grips its stem; the others have 0.1 mm of extra play so the cap is not over-constrained (a design assumption, not yet tried on a printed part). Shapes that are too thin or too hollow cannot hold three, even enlarged: ClickGen says so.
 - Only the A1 mini profile is embedded in the 3MF. The "256 mm" choice changes the layout and the maximum size, not the embedded profile (180 mm plate in the config): pick your printer in the slicer afterwards (not verified with a real P1S/X1 profile).
 - Decor **relief** (the "Relief" slider) leaves the flipped cap face floating: the 3MF then turns supports on for the cap, and the face is slightly rough.
 - The cap travels the full 4 mm in the interference simulation (simplified switch model); the author has not yet printed and tried a prototype with a real switch.
