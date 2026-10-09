@@ -121,11 +121,14 @@ export class Runner {
     return this.#request((id) => this.worker.postMessage({ type: 'coupon', id, params }));
   }
 
-  /** Lance un calcul. Les demandes plus anciennes encore en attente sont rejetées avec Superseded. */
-  run(params) {
+  /**
+   * Lance un calcul. Les demandes plus anciennes encore en attente sont rejetées avec Superseded.
+   * @param {{force?:boolean}} [o] force : le worker vide ses caches avant de calculer (bouton « Régénérer »)
+   */
+  run(params, { force = false } = {}) {
     for (const [oldId, w] of this.waiting) {
       if (w.isRun) { this.waiting.delete(oldId); w.reject(new Superseded()); }
     }
-    return this.#request((id) => this.worker.postMessage({ type: 'run', id, params }), { isRun: true });
+    return this.#request((id) => this.worker.postMessage({ type: 'run', id, params, force }), { isRun: true });
   }
 }

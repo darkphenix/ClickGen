@@ -76,6 +76,9 @@ const store = {
   msgs: [], // messages persistants : {kind, key, vars}
   toast: null,
   exporting: false,
+  srcState: {}, // format et couleurs propres à chaque source : { image, text } (voir rememberSource)
+  forceNext: false, // le prochain calcul ignore les caches (bouton Régénérer)
+  regenToast: false,
 };
 
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -208,16 +211,17 @@ const drop = $('#drop');
 
 /**
  * Définit l'image courante (importée ou rendue depuis un texte) et lance le calcul.
- * @param {{resetColors?:boolean, colors?:Record<number,string>}} [o]
+ * @param {{resetColors?:boolean, colors?:Record<number,string>, bgColor?:string|null}} [o]
+ *   bgColor : fond choisi à la pipette, à conserver quand on revient à une image déjà réglée
  */
 async function useImage(img, o = {}) {
-  const { resetColors = true, colors = {} } = o;
+  const { resetColors = true, colors = {}, bgColor = null } = o;
   store.image = img;
   if (resetColors) store.overrides = { ...colors };
   store.analysis = null;
   params.placementAngle = null;
   params.placementX = params.placementY = null;
-  params.bgColor = null;
+  params.bgColor = bgColor;
   store.picking = false;
   store.thumbEl = new Image();
   store.thumbEl.onload = drawThumb;
@@ -354,29 +358,61 @@ function scheduleText(delay = 320) {
 
 let textSeq = 0;
 
-async function applyText(first = false) {
+async function applyText() {
   const my = ++textSeq;
   try {
     const img = await renderText({ text: store.text.value, font: store.text.font, color: '#ffffff' });
     if (my !== textSeq) return; // un rendu plus récent est en cours : il s'occupera de l'affichage
     if (!img || store.src !== 'text') { setBusy(false); return; } // texte vide, ou l'utilisateur a changé d'onglet entre-temps
     if (params.frame === 'image') { params.frame = 'pill'; syncAll(); saveParams(); } // un texte seul n'a pas de contour utile
-    await useImage(img, first ? { colors: { 0: TEXT_BG, 1: '#ffffff' } } : { resetColors: false });
+    await useImage(img, { resetColors: false }); // les couleurs viennent de recallSource (ou de l'utilisateur)
   } catch (e) {
     console.error(e);
     setBusy(false);
   }
 }
 
-/** Bascule entre l'image importée et le texte. */
-function setSource(src, { reuse = true } = {}) {
+// Chaque source (image, texte) garde son propre format : sans cela, passer au texte laissait le cadre « pilule »
+// quand on revenait à l'image, et les couleurs choisies étaient perdues.
+const SOURCE_DEFAULTS = {
+  image: { frame: 'image', frameContent: 'auto', frameZoom: 1 },
+  text: { frame: 'pill', frameContent: 'auto', frameZoom: 1 },
+};
+const TEXT_COLORS = () => ({ 0: TEXT_BG, 1: '#ffffff' });
+
+/** Mémorise le format et les couleurs de la source qu'on quitte. */
+function rememberSource(src) {
+  store.srcState[src] = {
+    frame: params.frame, frameContent: params.frameContent, frameZoom: params.frameZoom,
+    overrides: { ...store.overrides }, bgColor: params.bgColor,
+  };
+}
+
+/** Remet le format et les couleurs mémorisés de la source (ou ses valeurs par défaut la première fois). */
+function recallSource(src) {
+  const s = store.srcState[src];
+  Object.assign(params, SOURCE_DEFAULTS[src], s ? { frame: s.frame, frameContent: s.frameContent, frameZoom: s.frameZoom } : {});
+  store.overrides = s ? { ...s.overrides } : (src === 'text' ? TEXT_COLORS() : {});
+  params.placementX = params.placementY = params.placementAngle = null;
+  syncAll();
+}
+
+/**
+ * Bascule entre l'image importée et le texte.
+ * @param {{reuse?:boolean, restore?:boolean}} [o] reuse : recalcule la source ; restore : mémorise la source quittée et
+ *   remet le format de la nouvelle (à désactiver quand les réglages viennent d'un projet ouvert)
+ */
+function setSource(src, { reuse = true, restore = true } = {}) {
+  const from = store.src;
+  if (restore && src !== from) rememberSource(from);
   store.src = src;
   $$('#srcTabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.src === src)));
   $('#srcImage').hidden = src !== 'image';
   $('#srcText').hidden = src !== 'text';
+  if (restore && src !== from) recallSource(src);
   if (!reuse) return;
-  if (src === 'text') applyText(true);
-  else if (store.imageSource) useImage(store.imageSource);
+  if (src === 'text') applyText();
+  else if (store.imageSource) useImage(store.imageSource, { resetColors: false, bgColor: store.srcState.image?.bgColor ?? null });
 }
 
 // ---------------------------------------------------------------- calcul --
@@ -393,8 +429,10 @@ function requestRun(delay = 240) {
 
 async function runNow() {
   const my = ++runSeq;
+  const force = store.forceNext; // demandé par « Régénérer » : le worker vide ses caches avant de calculer
+  store.forceNext = false;
   try {
-    const msg = await runner.run({ ...params });
+    const msg = await runner.run({ ...params }, { force });
     if (my !== runSeq) return;
     onResult(msg);
   } catch (e) {
@@ -405,7 +443,29 @@ async function runNow() {
   }
 }
 
+/**
+ * Bouton « Régénérer » : on renvoie l'image au worker (au cas où il aurait été relancé ou désynchronisé) puis on
+ * relance tout le calcul sans réutiliser ni l'analyse ni les maillages déjà calculés. Les réglages, les couleurs
+ * et la position choisie du switch sont conservés.
+ */
+async function regenerate() {
+  if (!runner || !store.image) return;
+  store.forceNext = true;
+  store.regenToast = true;
+  setBusy(true);
+  const btn = $('#regen');
+  btn.classList.add('spinning');
+  try {
+    await runner.setImage(store.image);
+  } catch (e) {
+    console.warn('renvoi de l\'image impossible (le calcul réessaiera)', e);
+  }
+  requestRun(0);
+  setTimeout(() => btn.classList.remove('spinning'), 700);
+}
+
 function onError(e) {
+  store.regenToast = false;
   // un refus normal (forme introuvable, trop fine, ne tient pas) n'est pas un bogue : pas de trace rouge
   (['empty', 'vanished', 'nofit'].includes(e.code) ? console.info : console.error)(e.workerStack || e);
   const key = { empty: 'msg.empty', vanished: 'msg.vanished', nofit: 'msg.nofit', geometry: 'msg.geometry', timeout: 'msg.timeout' }[e.code] ?? 'msg.internal';
@@ -448,6 +508,7 @@ function onResult(msg) {
   drawThumb();
   syncVisibility();
   setExportEnabled(true);
+  if (store.regenToast) { store.regenToast = false; flash('info', 'msg.regenDone'); }
 }
 
 // ----------------------------------------------------------------- couleurs --
@@ -706,12 +767,12 @@ async function openProject(file) {
       $('#textFont').value = store.text.font;
     }
     syncAll(); saveParams();
+    store.srcState = {}; // le projet fixe le format de sa source : rien à restaurer pour l'autre
     if (proj.src === 'text') {
-      store.src = 'text';
-      setSource('text', { reuse: false });
+      setSource('text', { reuse: false, restore: false });
       await applyTextKeepingColors();
     } else if (typeof proj.image?.dataUrl === 'string' && proj.image.dataUrl.startsWith('data:image/')) {
-      setSource('image', { reuse: false });
+      setSource('image', { reuse: false, restore: false });
       const keep = { ...store.overrides };
       if (await loadFrom(proj.image.dataUrl, String(proj.image.name ?? 'image'))) {
         store.overrides = keep; // les couleurs du projet, pas celles que l'image vient de proposer
@@ -727,7 +788,7 @@ async function openProject(file) {
 
 async function applyTextKeepingColors() {
   const keep = { ...store.overrides };
-  await applyText(false);
+  await applyText();
   store.overrides = keep;
   requestRun(0);
 }
@@ -785,6 +846,7 @@ function bindStage() {
     params.placementAngle = store.result ? store.result.placement.angle : (params.placementAngle ?? 0);
     requestRun(0);
   };
+  $('#regen').addEventListener('click', regenerate);
   $('#dl3mf').addEventListener('click', export3mf);
   $('#dlstl').addEventListener('click', exportStl);
   $('#coupon').addEventListener('click', exportCoupon);

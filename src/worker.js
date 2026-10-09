@@ -1,7 +1,8 @@
 // Calculs lourds hors du fil principal : l'interface reste fluide pendant que la géométrie se refait.
 // Protocole :
 //   -> {type:'image', id, width, height, buffer}   définit l'image source (buffer RGBA transféré)
-//   -> {type:'run', id, params}                    (re)calcule ; seules les dernières demandes comptent
+//   -> {type:'run', id, params, force?}            (re)calcule ; seules les dernières demandes comptent ;
+//                                                  force : vide les caches (analyse, maillages) avant de calculer
 //   -> {type:'coupon', id, params}                 banc d'essai de calibration
 //   <- {type:'result', id, analysis, result}       ou {type:'error', id, code, message, extra}
 //   <- {type:'coupon', id, mesh, info}
@@ -29,7 +30,8 @@ self.onmessage = (e) => {
     cache = { key: '', value: null };
     self.postMessage({ type: 'imageReady', id: m.id });
   } else if (m.type === 'run') {
-    pending = m; // une demande plus récente remplace celle qui attend
+    if (pending?.force) m.force = true; // une demande plus récente remplace celle qui attend, sans perdre « régénérer »
+    pending = m;
     if (!running) setTimeout(drain, 0);
   } else if (m.type === 'coupon') {
     runCoupon(m);
@@ -57,6 +59,11 @@ async function drain() {
   try {
     if (!img) throw new PipelineError('empty', 'Aucune image chargée.');
     const p = job.params;
+    if (job.force) { // « Régénérer » : on oublie l'analyse et les maillages déjà construits
+      cache = { key: '', value: null };
+      delete buildCache.shell;
+      delete buildCache.cap;
+    }
     const key = `${imgVersion}|${MASK_KEYS.map((k) => String(p[k])).join('|')}|${isFramed(p) ? 'frame' : 'outline'}`;
     // signes de vie : la page tue et relance le worker s'il reste muet trop longtemps (voir runner.js)
     const alive = (step) => self.postMessage({ type: 'progress', id: job.id, step });

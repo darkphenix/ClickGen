@@ -143,8 +143,11 @@ const FR = {
   'view.topAngle': 'Angle du switch',
   'view.topAuto': 'Auto',
   'view.topDrag': 'Faites glisser le carré bleu pour déplacer le switch.',
+  'view.regen': 'Régénérer',
+  'view.regenTip': 'Relance tout le calcul depuis l’image, sans réutiliser les résultats déjà calculés. Vos réglages et couleurs sont conservés.',
 
   'msg.computing': 'Calcul en cours…',
+  'msg.regenDone': 'Tout a été recalculé.',
   'msg.empty': 'Aucune forme détectée. Essayez une autre image ou réglez la tolérance du fond.',
   'msg.vanished': 'La forme est trop fine : elle disparaît quand les détails de moins de {minDetail} mm sont retirés. Réduisez « Détail minimum » ou placez l’image dans un cadre.',
   'msg.timeout': 'Le calcul a pris trop de temps et a été arrêté. Simplifiez l’image, augmentez « Détail minimum » ou choisissez un cadre.',
@@ -319,8 +322,11 @@ const EN = {
   'view.topAngle': 'Switch angle',
   'view.topAuto': 'Auto',
   'view.topDrag': 'Drag the blue square to move the switch.',
+  'view.regen': 'Regenerate',
+  'view.regenTip': 'Runs the whole computation again from the image, without reusing earlier results. Your settings and colors are kept.',
 
   'msg.computing': 'Working…',
+  'msg.regenDone': 'Everything was recomputed.',
   'msg.empty': 'No shape detected. Try another image or tune the background tolerance.',
   'msg.vanished': 'The shape is too thin: it disappears once details under {minDetail} mm are removed. Lower “Minimum detail” or put the image in a frame.',
   'msg.timeout': 'The computation took too long and was stopped. Simplify the image, raise “Minimum detail” or pick a frame.',

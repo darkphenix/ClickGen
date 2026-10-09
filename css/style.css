@@ -276,6 +276,12 @@ input[type=range]:active::-webkit-slider-thumb { transform: translateY(2px); }
 .stage .seg button + button { border-left-color: rgba(234, 243, 255, .28); }
 .stage .seg button:hover:not([aria-selected=true]) { background: rgba(255, 255, 255, .12); }
 
+.stage-top .chip { background: rgba(8, 36, 78, .55); border-color: rgba(234, 243, 255, .28); color: var(--chalk); backdrop-filter: blur(6px); padding: 5px 13px; }
+.stage-top .chip:hover { background: rgba(255, 255, 255, .22); border-color: rgba(234, 243, 255, .5); }
+.chip .ico { display: inline-block; margin-right: 6px; font-size: 15px; line-height: 1; }
+.chip.spinning .ico { animation: turn .7s linear infinite; }
+@keyframes turn { to { transform: rotate(360deg); } }
+
 .messages { margin-left: auto; display: grid; gap: 6px; justify-items: end; max-width: min(460px, 60%); }
 .msg { padding: 7px 12px; border-radius: 10px; font-size: 13px; line-height: 1.35; background: rgba(244, 246, 251, .96); color: var(--ink); box-shadow: 0 2px 8px rgba(0, 20, 60, .35); border-left: 4px solid var(--ink-2); }
 .msg.warn { border-left-color: var(--amber); }

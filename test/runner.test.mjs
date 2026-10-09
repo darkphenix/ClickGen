@@ -111,6 +111,19 @@ test('runner : un worker qui échoue en boucle n\'est pas recréé indéfiniment
   assert.equal(instances.at(-1).sent.length, sentBefore);
 });
 
+test('runner : « forcer » est transmis au worker, et seulement quand on le demande', async () => {
+  const r = fresh();
+  const w = instances[0];
+  const normal = r.run({ size: 60 });
+  assert.equal(w.last('run').force, false, 'par défaut : on réutilise les caches');
+  w.emit({ type: 'result', id: w.last('run').id, ok: 1 });
+  await normal;
+  const forced = r.run({ size: 60 }, { force: true });
+  assert.equal(w.last('run').force, true, 'régénérer : le worker doit vider ses caches');
+  w.emit({ type: 'result', id: w.last('run').id, ok: 2 });
+  assert.equal((await forced).ok, 2);
+});
+
 test('runner : une erreur du worker devient une Error avec code et détails', async () => {
   const r = fresh();
   const p = r.run({});
