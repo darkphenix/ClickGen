@@ -85,7 +85,7 @@ npm run serve     # serveur de développement sur le port 5173
 - Le contour d'une image très détaillée ou d'une photo est compliqué : choisissez plutôt un **cadre** (le décor reste l'image) ou un logo, une mascotte, un aplat sur fond transparent ou uni.
 - Au-delà de 4 filaments chargés en même temps, un AMS lite ne suffit plus : réduisez le nombre de couleurs ou donnez la même couleur à deux pièces. En deux plateaux seul le capuchon compte (4 couleurs au plus, la coque se charge à part) ; sur un plateau, la coque compte aussi.
 - Une seule pièce est conservée (la plus grande) ; les îlots détachés sont ignorés.
-- Seul le profil de l'A1 mini est embarqué dans le 3MF. Le choix « 256 mm » ne change que la disposition : choisissez ensuite votre imprimante dans le slicer (non vérifié avec un vrai profil P1S/X1).
+- Seul le profil de l'A1 mini est embarqué dans le 3MF. Le choix « 256 mm » change la disposition et la taille maximale, pas le profil embarqué (plateau de 180 mm dans la config) : choisissez ensuite votre imprimante dans le slicer (non vérifié avec un vrai profil P1S/X1).
 - Le **relief** du décor (curseur « Relief ») rend la face du capuchon flottante une fois retourné : le 3MF active alors des supports sur le capuchon, la face est un peu rugueuse.
 - Le capuchon descend de 4 mm dans la simulation d'interférences (modèle de switch simplifié) ; aucun prototype n'a encore été imprimé et essayé avec un vrai switch par l'auteur.
 

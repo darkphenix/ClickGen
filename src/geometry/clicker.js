@@ -91,7 +91,7 @@ export function buildCap(wasm, scope, cap, placement, art, p) {
 
   const rim = MECH.capPocketRim, ceil = MECH.capPocketCeil;
   const reliefProfile = T(CrossSection.square([rim, rim], true));
-  // scaleTop doit être un couple [x, y] : un simple nombre ne réduirait que l'axe X (manifold 3.5)
+  // scaleTop doit être un couple [x, y] : un simple nombre n est lu comme (n, 0) et écraserait le sommet en Y (manifold 3.5)
   const reliefRaw = T(reliefProfile.extrude(d.reliefDepth + 0.04, 0, 0, [ceil / rim, ceil / rim]));
   const relief = T(T(reliefRaw.rotate(0, 0, angle)).translate(px, py, -0.04));
   body = T(body.subtract(relief));

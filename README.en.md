@@ -85,7 +85,7 @@ npm run serve     # dev server on port 5173
 - The outline of a very detailed image or photo is complicated: pick a **frame** instead (the image stays as the decor), or use a logo, a mascot or flat art on a transparent or plain background.
 - Beyond 4 filaments loaded at once an AMS lite is not enough: reduce the color count or give two parts the same color. On two plates only the cap counts (4 colors at most, the shell is loaded separately); on one plate the shell counts too.
 - Only one piece is kept (the largest); detached islands are ignored.
-- Only the A1 mini profile is embedded in the 3MF. The "256 mm" choice only changes the layout: pick your printer in the slicer afterwards (not verified with a real P1S/X1 profile).
+- Only the A1 mini profile is embedded in the 3MF. The "256 mm" choice changes the layout and the maximum size, not the embedded profile (180 mm plate in the config): pick your printer in the slicer afterwards (not verified with a real P1S/X1 profile).
 - Decor **relief** (the "Relief" slider) leaves the flipped cap face floating: the 3MF then turns supports on for the cap, and the face is slightly rough.
 - The cap travels the full 4 mm in the interference simulation (simplified switch model); the author has not yet printed and tried a prototype with a real switch.
 

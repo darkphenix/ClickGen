@@ -70,7 +70,7 @@ Mesures sur un ours de 800 px (mono-fil, machine de développement) : détourage
 
 ## Pièges rencontrés
 
-- `CrossSection.extrude(h, n, twist, scaleTop)` : un `scaleTop` numérique ne réduit que l'axe X dans manifold 3.5 ; il faut un couple `[x, y]`. Le test d'interférences (`test/mechanics.test.mjs`) l'a révélé.
+- `CrossSection.extrude(h, n, twist, scaleTop)` : un `scaleTop` numérique `n` est lu comme `(n, 0)` dans manifold 3.5 (le sommet s'écrase en Y) ; il faut un couple `[x, y]`. Le test d'interférences (`test/mechanics.test.mjs`) l'a révélé.
 - Les maillages de manifold peuvent contenir des sommets de même position mais d'indices différents (pincement quand deux régions de décor se touchent en un point) : ils sont fermés **en indices** ; on vérifie donc l'étanchéité sans souder par position.
 - Un contour de décor exactement confondu avec celui du capuchon crée des faces coïncidentes : le décor déborde de 0,5 mm et la découpe 3D l'ajuste.
 - `CrossSection.bounds()` d'une section **vide** renvoie ±1,8e308 (pas une boîte vide) : une forme plus fine que « Détail minimum » donnait une taille infinie, une échelle de départ nulle et une recherche d'agrandissement sans fin. Le pipeline refuse maintenant ce cas (`vanished`) et borne la boucle ; `test/pipeline.test.mjs` l'exerce dans un `worker_thread` qu'il peut tuer.
